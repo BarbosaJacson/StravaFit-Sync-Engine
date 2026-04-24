@@ -2,10 +2,12 @@ package jackson.stravafit.service;
 
 import jackson.stravafit.client.StravaClient;
 import jackson.stravafit.model.StravaActivity;
+import jackson.stravafit.model.TokenResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.List;
 
@@ -13,24 +15,30 @@ import java.util.List;
 public class SyncScheduler {
 
     private final StravaClient stravaClient;
+    private final StravaAuthService authService; // Injetando o novo serviço
 
-    // O Spring vai buscar isso no application.properties,
-    // que por sua vez busca nas Environment Variables do IntelliJ
     @Value("${strava.access-token}")
     private String accessToken;
 
-    public SyncScheduler(StravaClient stravaClient) {
+    @Value("${strava.refresh-token}")
+    private String refreshToken; // Precisamos do refresh para renovar
+
+    public SyncScheduler(StravaClient stravaClient, StravaAuthService authService) {
         this.stravaClient = stravaClient;
+        this.authService = authService;
     }
 
-    // Este método roda automaticamente assim que o projeto termina de subir
     @EventListener(ApplicationReadyEvent.class)
     public void syncOnStartup() {
+        executarSincronizacao(this.accessToken);
+    }
+
+    private void executarSincronizacao(String tokenParaUsar) {
         System.out.println("\n=== [MOTOR DE SINCRONIZAÇÃO INICIADO] ===");
         System.out.println("Buscando atividades recentes de Jackson...");
 
         try {
-            List<StravaActivity> activities = stravaClient.getActivities(accessToken);
+            List<StravaActivity> activities = stravaClient.getActivities(tokenParaUsar);
 
             if (activities.isEmpty()) {
                 System.out.println("Nenhuma atividade encontrada recentemente.");
@@ -42,9 +50,25 @@ public class SyncScheduler {
                             activity.averageHeartRate());
                 });
             }
+        } catch (HttpClientErrorException.Unauthorized e) {
+            // Se cair aqui, o token expirou!
+            System.out.println("AVISO: Access Token expirado. Tentando renovação automática...");
+
+            try {
+                TokenResponse novoToken = authService.refreshToken(refreshToken);
+                this.accessToken = novoToken.getAccessToken(); // Atualiza para a próxima vez
+
+                System.out.println("Token renovado com sucesso! Reiniciando busca...");
+
+                // Chamada recursiva: tenta de novo com o novo token
+                executarSincronizacao(this.accessToken);
+
+            } catch (Exception authError) {
+                System.err.println("ERRO CRÍTICO na renovação do token: " + authError.getMessage());
+            }
+
         } catch (Exception e) {
             System.err.println("ERRO NA CONEXÃO: " + e.getMessage());
-            System.out.println("Dica: Verifique se o seu Access Token ainda é válido!");
         }
 
         System.out.println("==========================================\n");

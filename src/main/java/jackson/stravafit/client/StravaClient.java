@@ -18,7 +18,7 @@ public class StravaClient {
 
     public List<StravaActivity> getActivities(String token) {
         return restClient.get()
-                .uri("/api/v3/athlete/activities") // Colocamos o caminho completo aqui
+                .uri("/api/v3/athlete/activities?per_page=200") // Colocamos o caminho completo aqui
                 .header("Authorization", "Bearer " + token)
                 .retrieve()
                 .body(new ParameterizedTypeReference<List<StravaActivity>>() {});
