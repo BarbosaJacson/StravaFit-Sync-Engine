@@ -3,6 +3,8 @@ package jackson.stravafit.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record StravaActivity(
         Long id,
@@ -38,4 +40,29 @@ public record StravaActivity(
         Double averageHeartRate,
 
         Double calories
-) {}
+) {
+    // DTOs auxiliares para dados detalhados
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record HeartRateZone(
+            @JsonProperty("distribution_buckets") List<ZoneBucket> distribution
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ZoneBucket(
+            Double min,
+            Double max,
+            Integer time // tempo em segundos nesta zona
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ActivityStream(
+            String type,
+            List<Double> data
+    ) {}
+
+    public record MinuteAnalysis(
+            int minute,
+            double averageHeartRate,
+            int zone
+    ) {}
+}
