@@ -50,25 +50,29 @@ public class SyncScheduler {
                     temMaisDados = false;
                 } else {
                     response.activities().forEach(activity -> {
-                        System.out.printf("-> Atividade: %s | Data: %s | Distância: %.2f km | BPM Médio: %.0f | Tempo Total: %d min%n",
+                        // Coleta de dados detalhados (pós-filtro) primeiro para ter a zona dominante no cabeçalho
+                        try {
+                            List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(tokenParaUsar, activity.id());
+                            List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(tokenParaUsar, activity.id());
+                            List<Double> hrData = activityService.getHeartRateStream(streams);
+                            String zonaDominante = activityService.calculateDominantZoneSummary(hrData);
+
+                        System.out.printf("-> Atividade: %s | Data: %s | Distância: %.2f km | BPM Médio: %.0f | BPM Máx: %.0f | Tempo Total: %d min | Intensidade: %s%n",
                                 activity.name(),
                                 activity.startDateLocal(),
                                 activity.distanceKm(),
                                 activity.averageHeartRate(),
-                                activity.elapsedTimeMinutes());
-
-                        // Coleta de dados detalhados (pós-filtro)
-                        try {
-                            List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(tokenParaUsar, activity.id());
-                            List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(tokenParaUsar, activity.id());
+                                activity.maxHeartRate(),
+                                activity.elapsedTimeMinutes(),
+                                zonaDominante);
 
                             // Processamento inteligente: Transforma segundos em minutos com zonas
                             List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, zones);
                             
                             System.out.println("   [Análise Minuto a Minuto]");
                             minuteAnalysis.forEach(m -> {
-                                System.out.printf("      Min %02d: %.0f BPM (Zona %d) | Alt: %.1fm | Cad: %.0f rpm%n", 
-                                        m.minute(), m.averageHeartRate(), m.zone(), m.averageElevation(), m.averageCadence());
+                                System.out.printf("      Min %02d: Méd %.0f / Máx %.0f BPM (Zona %d) | Alt: %.1fm | Cad: %.0f rpm%n", 
+                                        m.minute(), m.averageHeartRate(), m.maxHeartRate(), m.zone(), m.averageElevation(), m.averageCadence());
                             });
                             
                             // Essencial para evitar o erro de I/O (Rate Limit do Strava: 100 req / 15 min)

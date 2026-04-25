@@ -39,6 +39,9 @@ public record StravaActivity(
         @JsonProperty("average_heartrate")
         Double averageHeartRate,
 
+        @JsonProperty("max_heartrate")
+        Double maxHeartRate,
+
         Double calories
 ) {
     public double distanceKm() {
@@ -71,8 +74,16 @@ public record StravaActivity(
     public record MinuteAnalysis(
             int minute,
             double averageHeartRate,
+            double maxHeartRate,
             int zone,
             double averageElevation,
             double averageCadence
+    ) {}
+
+    public record AthleteInsight(
+            String athleteId,
+            String lastActivityDate,
+            String summarizedStatus, // Texto gerado pelo Gemini
+            Double fitnessScore     // Uma métrica calculada pela sua lógica
     ) {}
 }
