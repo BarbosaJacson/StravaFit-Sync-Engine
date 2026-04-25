@@ -76,6 +76,10 @@ public class SyncScheduler {
                             });
                             
                             // Essencial para evitar o erro de I/O (Rate Limit do Strava: 100 req / 15 min)
+                            // SALVAMENTO NO BANCO DE DADOS
+                            activityService.saveActivity(activity, minuteAnalysis, zonaDominante);
+                            System.out.println("   [DATABASE] Atividade persistida no MySQL com sucesso.");
+
                             // 2000ms (2 segundos) garantem que as ~120 requisições levem mais de 15 min, 
                             // mantendo o fluxo seguro e estável.
                             Thread.sleep(2000); 

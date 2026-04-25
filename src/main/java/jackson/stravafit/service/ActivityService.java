@@ -2,7 +2,11 @@ package jackson.stravafit.service;
 
 import jackson.stravafit.client.StravaClient;
 import jackson.stravafit.model.StravaActivity;
+import jackson.stravafit.model.ActivityEntity;
+import jackson.stravafit.model.MinuteAnalysisEntity;
+import jackson.stravafit.repository.ActivityRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,6 +19,7 @@ import java.util.Collections;
 public class ActivityService {
 
     private final StravaClient stravaClient;
+    private final ActivityRepository activityRepository;
 
     @Value("${atleta.hr-max}")
     private int hrMax;
@@ -22,8 +27,9 @@ public class ActivityService {
     @Value("${atleta.hr-resting}")
     private int hrResting;
 
-    public ActivityService(StravaClient stravaClient) {
+    public ActivityService(StravaClient stravaClient, ActivityRepository activityRepository) {
         this.stravaClient = stravaClient;
+        this.activityRepository = activityRepository;
     }
 
     /**
@@ -52,6 +58,37 @@ public class ActivityService {
         return stravaClient.getActivityStreams(token, id);
     }
 
+    @Transactional
+    public void saveActivity(StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone) {
+        if (activity.id() == null || activityRepository.existsById(activity.id())) return;
+
+        List<MinuteAnalysisEntity> minuteEntities = minutes.stream()
+                .map(m -> MinuteAnalysisEntity.builder()
+                        .minute(m.minute())
+                        .averageHeartRate(m.averageHeartRate())
+                        .maxHeartRate(m.maxHeartRate())
+                        .zone(m.zone())
+                        .averageElevation(m.averageElevation())
+                        .averageCadence(m.averageCadence())
+                        .build())
+                .toList();
+
+        ActivityEntity entity = ActivityEntity.builder()
+                .id(activity.id())
+                .name(activity.name())
+                .startDate(activity.startDateLocal())
+                .distanceKm(activity.distanceKm())
+                .averageHeartRate(activity.averageHeartRate())
+                .maxHeartRate(activity.maxHeartRate())
+                .sportType(activity.sportType())
+                .dominantZone(zone)
+                .totalTimeMinutes(activity.elapsedTimeMinutes())
+                .minuteDetails(new ArrayList<>(minuteEntities))
+                .build();
+
+        activityRepository.save(entity);
+    }
+
     /**
      * Transforma dados de segundos em médias por minuto e identifica a zona cardíaca.
      */
@@ -66,7 +103,7 @@ public class ActivityService {
         List<Double> altData = extractStream(streams, "altitude");
         List<Double> cadData = extractStream(streams, "cadence");
 
-        if (hrData.isEmpty()) return analysis;
+        if (hrData == null || hrData.isEmpty()) return analysis;
 
         for (int i = 0; i < hrData.size(); i += 60) {
             int end = Math.min(i + 60, hrData.size());
@@ -79,7 +116,7 @@ public class ActivityService {
             
             int minuteNumber = (i / 60) + 1;
             int zoneDetected = calculateKarvonenZone(avgHr);
-
+            
             analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad));
         }
         return analysis;
