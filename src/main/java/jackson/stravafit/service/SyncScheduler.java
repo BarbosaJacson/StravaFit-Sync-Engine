@@ -53,9 +53,9 @@ public class SyncScheduler {
                         System.out.printf("-> Atividade: %s | Data: %s | Distância: %.2f km | BPM Médio: %.0f | Tempo Total: %d min%n",
                                 activity.name(),
                                 activity.startDateLocal(),
-                                activity.distance() / 1000,
+                                activity.distanceKm(),
                                 activity.averageHeartRate(),
-                                activity.elapsedTime() / 60);
+                                activity.elapsedTimeMinutes());
 
                         // Coleta de dados detalhados (pós-filtro)
                         try {
@@ -67,12 +67,14 @@ public class SyncScheduler {
                             
                             System.out.println("   [Análise Minuto a Minuto]");
                             minuteAnalysis.forEach(m -> {
-                                System.out.printf("      Min %02d: %.0f BPM (Zona %d)%n", 
-                                        m.minute(), m.averageHeartRate(), m.zone());
+                                System.out.printf("      Min %02d: %.0f BPM (Zona %d) | Alt: %.1fm | Cad: %.0f rpm%n", 
+                                        m.minute(), m.averageHeartRate(), m.zone(), m.averageElevation(), m.averageCadence());
                             });
                             
-                            // Pequena pausa opcional para respeitar o Rate Limit do Strava (100 req / 15 min)
-                            // Thread.sleep(200); 
+                            // Essencial para evitar o erro de I/O (Rate Limit do Strava: 100 req / 15 min)
+                            // 2000ms (2 segundos) garantem que as ~120 requisições levem mais de 15 min, 
+                            // mantendo o fluxo seguro e estável.
+                            Thread.sleep(2000); 
 
                         } catch (Exception e) {
                             System.err.println("   [ERRO] Falha ao buscar detalhes da atividade " + activity.id() + ": " + e.getMessage());

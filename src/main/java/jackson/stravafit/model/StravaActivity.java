@@ -41,6 +41,14 @@ public record StravaActivity(
 
         Double calories
 ) {
+    public double distanceKm() {
+        return distance != null ? distance / 1000 : 0.0;
+    }
+
+    public int elapsedTimeMinutes() {
+        return elapsedTime != null ? elapsedTime / 60 : 0;
+    }
+
     // DTOs auxiliares para dados detalhados
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record HeartRateZone(
@@ -63,6 +71,8 @@ public record StravaActivity(
     public record MinuteAnalysis(
             int minute,
             double averageHeartRate,
-            int zone
+            int zone,
+            double averageElevation,
+            double averageCadence
     ) {}
 }

@@ -34,12 +34,14 @@ public class StravaClient {
     }
 
     public List<StravaActivity.HeartRateZone> getActivityZones(String token, Long activityId) {
-        return restClient.get()
+        List<StravaActivity.HeartRateZone> zones = restClient.get()
                 .uri("/api/v3/activities/{id}/zones", activityId)
                 .header("Authorization", "Bearer " + token)
                 .accept(MediaType.APPLICATION_JSON)
                 .retrieve()
                 .body(new ParameterizedTypeReference<List<StravaActivity.HeartRateZone>>() {});
+        
+        return zones != null ? zones : List.of();
     }
 
     /**
@@ -47,14 +49,16 @@ public class StravaClient {
      * O Strava retorna arrays de dados sincronizados por tempo.
      */
     public List<StravaActivity.ActivityStream> getActivityStreams(String token, Long activityId) {
-        return restClient.get()
+        List<StravaActivity.ActivityStream> streams = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/api/v3/activities/{id}/streams")
-                        .queryParam("keys", "time,heartrate,velocity_smooth")
+                        .queryParam("keys", "time,heartrate,altitude,cadence")
                         .build(activityId))
                 .header("Authorization", "Bearer " + token)
                 .accept(MediaType.APPLICATION_JSON)
                 .retrieve()
                 .body(new ParameterizedTypeReference<List<StravaActivity.ActivityStream>>() {});
+
+        return streams != null ? streams : List.of();
     }
 }

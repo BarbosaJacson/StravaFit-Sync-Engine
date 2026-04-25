@@ -47,12 +47,10 @@ public class ActivityService {
         
         List<StravaActivity.MinuteAnalysis> analysis = new ArrayList<>();
         
-        // Localiza o stream de batimento cardíaco
-        List<Double> hrData = streams.stream()
-                .filter(s -> "heartrate".equals(s.type()))
-                .findFirst()
-                .map(StravaActivity.ActivityStream::data)
-                .orElse(List.of());
+        // Extração dos streams necessários
+        List<Double> hrData = extractStream(streams, "heartrate");
+        List<Double> altData = extractStream(streams, "altitude");
+        List<Double> cadData = extractStream(streams, "cadence");
 
         if (hrData.isEmpty()) return analysis;
 
@@ -64,19 +62,42 @@ public class ActivityService {
             List<Double> minuteSlice = hrData.subList(i, end);
             
             double avgHr = minuteSlice.stream().mapToDouble(d -> d).average().orElse(0.0);
-            int minuteNumber = (i / 60) + 1;
+            double avgAlt = getAverage(altData, i, end);
+            double avgCad = getAverage(cadData, i, end);
             
-            // Identifica a zona baseada no BPM médio deste minuto
-            int zoneDetected = 0;
-            for (int z = 0; z < buckets.size(); z++) {
-                if (avgHr >= buckets.get(z).min() && (buckets.get(z).max() == -1 || avgHr <= buckets.get(z).max())) {
-                    zoneDetected = z + 1;
-                    break;
-                }
-            }
-            analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, zoneDetected));
+            int minuteNumber = (i / 60) + 1;
+            int zoneDetected = calculateZone(avgHr, buckets);
+
+            analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, zoneDetected, avgAlt, avgCad));
         }
         return analysis;
+    }
+
+    private List<Double> extractStream(List<StravaActivity.ActivityStream> streams, String type) {
+        return streams.stream()
+                .filter(s -> type.equals(s.type()))
+                .findFirst()
+                .map(StravaActivity.ActivityStream::data)
+                .orElse(List.of());
+    }
+
+    private double getAverage(List<Double> data, int start, int end) {
+        if (data.isEmpty() || start >= data.size()) return 0.0;
+        int actualEnd = Math.min(end, data.size());
+        return data.subList(start, actualEnd).stream().mapToDouble(d -> d).average().orElse(0.0);
+    }
+
+    private int calculateZone(double avgHr, List<StravaActivity.ZoneBucket> buckets) {
+        for (int z = 0; z < buckets.size(); z++) {
+            StravaActivity.ZoneBucket bucket = buckets.get(z);
+            boolean acimaDoMinimo = avgHr >= bucket.min();
+            boolean abaixoDoMaximo = bucket.max() == -1 || avgHr <= bucket.max();
+            
+            if (acimaDoMinimo && abaixoDoMaximo) {
+                return z + 1;
+            }
+        }
+        return 0;
     }
 
     public record ActivityPageResponse(
