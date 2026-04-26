@@ -59,7 +59,7 @@ public class ActivityService {
     }
 
     @Transactional
-    public void saveActivity(StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone) {
+    public void saveActivity(StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone, String insight) {
         if (activity.id() == null || activityRepository.existsById(activity.id())) return;
 
         List<MinuteAnalysisEntity> minuteEntities = minutes.stream()
@@ -83,6 +83,7 @@ public class ActivityService {
                 .sportType(activity.sportType())
                 .dominantZone(zone)
                 .totalTimeMinutes(activity.elapsedTimeMinutes())
+                .geminiInsight(insight)
                 .minuteDetails(new ArrayList<>(minuteEntities))
                 .build();
 

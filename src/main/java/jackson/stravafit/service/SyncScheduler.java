@@ -8,7 +8,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -16,6 +15,7 @@ public class SyncScheduler {
 
     private final ActivityService activityService;
     private final StravaAuthService authService;
+    private final InsightService insightService;
 
     @Value("${strava.access-token}")
     private String accessToken;
@@ -23,9 +23,10 @@ public class SyncScheduler {
     @Value("${strava.refresh-token}")
     private String refreshToken;
 
-    public SyncScheduler(ActivityService activityService, StravaAuthService authService) {
+    public SyncScheduler(ActivityService activityService, StravaAuthService authService, InsightService insightService) {
         this.activityService = activityService;
         this.authService = authService;
+        this.insightService = insightService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -43,55 +44,49 @@ public class SyncScheduler {
 
         try {
             while (temMaisDados) {
-                // Chamamos o serviço que já retorna os dados filtrados (BPM > 0)
                 ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(tokenParaUsar, pagina);
 
                 if (response.rawCount() == 0) {
                     temMaisDados = false;
                 } else {
                     response.activities().forEach(activity -> {
-                        // Coleta de dados detalhados (pós-filtro) primeiro para ter a zona dominante no cabeçalho
                         try {
                             List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(tokenParaUsar, activity.id());
                             List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(tokenParaUsar, activity.id());
                             List<Double> hrData = activityService.getHeartRateStream(streams);
                             String zonaDominante = activityService.calculateDominantZoneSummary(hrData);
 
-                        System.out.printf("-> Atividade: %s | Data: %s | Distância: %.2f km | BPM Médio: %.0f | BPM Máx: %.0f | Tempo Total: %d min | Intensidade: %s%n",
-                                activity.name(),
-                                activity.startDateLocal(),
-                                activity.distanceKm(),
-                                activity.averageHeartRate(),
-                                activity.maxHeartRate(),
-                                activity.elapsedTimeMinutes(),
-                                zonaDominante);
+                            System.out.printf("-> Atividade: %s | Data: %s | Distância: %.2f km | BPM Médio: %.0f | BPM Máx: %.0f | Tempo Total: %d min | Intensidade: %s%n",
+                                    activity.name(),
+                                    activity.startDateLocal(),
+                                    activity.distanceKm(),
+                                    activity.averageHeartRate(),
+                                    activity.maxHeartRate(),
+                                    activity.elapsedTimeMinutes(),
+                                    zonaDominante);
 
-                            // Processamento inteligente: Transforma segundos em minutos com zonas
                             List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, zones);
                             
-                            System.out.println("   [Análise Minuto a Minuto]");
-                            minuteAnalysis.forEach(m -> {
-                                System.out.printf("      Min %02d: Méd %.0f / Máx %.0f BPM (Zona %d) | Alt: %.1fm | Cad: %.0f rpm%n", 
-                                        m.minute(), m.averageHeartRate(), m.maxHeartRate(), m.zone(), m.averageElevation(), m.averageCadence());
-                            });
-                            
-                            // Essencial para evitar o erro de I/O (Rate Limit do Strava: 100 req / 15 min)
-                            // SALVAMENTO NO BANCO DE DADOS
-                            activityService.saveActivity(activity, minuteAnalysis, zonaDominante);
+                            // Geração de Insight com Gemini
+                            System.out.println("   [GEMINI] Gerando análise de performance...");
+                            String insight = insightService.getActivityInsight(activity, minuteAnalysis);
+                            System.out.println("   [INSIGHT]: " + insight);
+
+                            // SALVAMENTO NO BANCO DE DADOS (Agora com Insight)
+                            activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
                             System.out.println("   [DATABASE] Atividade persistida no MySQL com sucesso.");
 
-                            // 2000ms (2 segundos) garantem que as ~120 requisições levem mais de 15 min, 
-                            // mantendo o fluxo seguro e estável.
-                            Thread.sleep(2000); 
+                            // Aumentado para 5 segundos para respeitar o Rate Limit do Gemini (Quota 429)
+                            Thread.sleep(5000); 
 
                         } catch (Exception e) {
-                            System.err.println("   [ERRO] Falha ao buscar detalhes da atividade " + activity.id() + ": " + e.getMessage());
+                            System.err.println("   [ERRO] Falha ao processar atividade " + activity.id() + ": " + e.getMessage());
                         }
                     });
 
                     totalProcessado += response.activities().size();
                     System.out.println("--- Página " + pagina + " processada (" + response.activities().size() + " válidos de " + response.rawCount() + ") ---");
-                    pagina++; // Incrementa para buscar a próxima página no próximo loop
+                    pagina++;
                 }
             }
 
@@ -103,10 +98,7 @@ public class SyncScheduler {
                 TokenResponse novoToken = authService.refreshToken(refreshToken);
                 this.accessToken = novoToken.getAccessToken();
                 System.out.println("Token renovado! Reiniciando carga completa...");
-
-                // Reinicia do zero com o token novo
                 executarSincronizacao(this.accessToken);
-                return; // Encerra a execução atual para não duplicar logs
             } catch (Exception authError) {
                 System.err.println("ERRO CRÍTICO na renovação: " + authError.getMessage());
             }

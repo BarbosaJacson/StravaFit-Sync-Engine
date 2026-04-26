@@ -20,6 +20,9 @@ public class ActivityEntity {
     private String dominantZone;
     private Integer totalTimeMinutes;
 
+    @Column(columnDefinition = "TEXT")
+    private String geminiInsight;
+
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "activity_id")
     @Builder.Default
