@@ -1,12 +1,14 @@
 package jackson.stravafit.service;
 
 import jackson.stravafit.client.TelegramClient;
+import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.TokenResponse;
 import jackson.stravafit.repository.ActivityRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
@@ -40,71 +42,99 @@ public class SyncScheduler {
         this.activityRepository = activityRepository;
     }
 
-    // Executa ao ligar o computador (para garantir que nada ficou para trás)
     @EventListener(ApplicationReadyEvent.class)
     public void syncOnStartup() {
-        System.out.println("   [STARTUP] Verificação inicial de treinos...");
+        System.out.println("   [STARTUP] Iniciando motor e verificando pendências...");
         executarSincronizacao(this.accessToken);
+        garantirEEnviarUltimoInsight();
     }
 
-    // AGENDAMENTO: Terça, Quinta e Sábado às 07:00, 07:30 e 08:00
-    // Cron format: "sec min hour day month day-of-week"
+    // Agendamento principal: Ter, Qui, Sab (Horários de treino)
     @Scheduled(cron = "0 0,30 7,8 * * TUE,THU,SAT")
     public void scheduledSync() {
         System.out.println("\n=== [AGENDAMENTO AUTOMÁTICO DISPARADO] ===");
         executarSincronizacao(this.accessToken);
+        garantirEEnviarUltimoInsight();
     }
 
-    private void executarSincronizacao(String tokenParaUsar) {
-        System.out.println("=== [MOTOR DE SINCRONIZAÇÃO INICIADO] ===");
+    // TAREFA DE RECUPERAÇÃO: Tenta "curar" atividades sem insight a cada 1 hora
+    @Scheduled(cron = "0 0 * * * *")
+    public void recoveryTask() {
+        System.out.println("   [RECOVERY] Verificando se há treinos pendentes de análise...");
+        garantirEEnviarUltimoInsight();
+    }
 
+    private boolean executarSincronizacao(String tokenParaUsar) {
         try {
             ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(tokenParaUsar, 1);
-
-            if (response.activities().isEmpty()) {
-                System.out.println("Nenhuma atividade compatível encontrada.");
-                return;
-            }
+            if (response.activities().isEmpty()) return false;
 
             StravaActivity activity = response.activities().get(0);
+            if (activityRepository.existsById(activity.id())) return false;
 
-            if (activityRepository.existsById(activity.id())) {
-                System.out.println("-> Última atividade (" + activity.name() + ") já analisada anteriormente.");
-                return;
-            }
-
-            System.out.println("-> Detectado NOVO TREINO: " + activity.name());
-            
-            List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(tokenParaUsar, activity.id());
-            List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(tokenParaUsar, activity.id());
-            List<Double> hrData = activityService.getHeartRateStream(streams);
-            String zonaDominante = activityService.calculateDominantZoneSummary(hrData);
-
-            List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, zones);
-            
-            System.out.println("   [GEMINI] Gerando análise de performance profissional...");
-            String insight = insightService.getActivityInsight(activity, minuteAnalysis);
-            
-            System.out.println("   [TELEGRAM] Enviando feedback para o celular...");
-            String telegramMessage = String.format("COACH STRAVAFIT: %s\n\n%s", activity.name(), insight);
-            telegramClient.sendMessage(telegramMessage);
-
-            activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
-            System.out.println("   [DATABASE] Atividade salva com sucesso.");
+            System.out.println("-> NOVO TREINO DETECTADO: " + activity.name());
+            processarEEnviar(tokenParaUsar, activity);
+            return true;
 
         } catch (HttpClientErrorException.Unauthorized e) {
-            System.out.println("AVISO: Token expirado. Renovando...");
-            try {
-                TokenResponse novoToken = authService.refreshToken(refreshToken);
-                this.accessToken = novoToken.getAccessToken();
-                executarSincronizacao(this.accessToken);
-            } catch (Exception authError) {
-                System.err.println("ERRO CRÍTICO na renovação: " + authError.getMessage());
-            }
+            renovarToken();
+            return executarSincronizacao(this.accessToken);
         } catch (Exception e) {
-            System.err.println("ERRO NA CONEXÃO: " + e.getMessage());
+            System.err.println("ERRO NA SINCRONIZAÇÃO: " + e.getMessage());
+            return false;
         }
+    }
+
+    private void processarEEnviar(String token, StravaActivity activity) throws InterruptedException {
+        List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(token, activity.id());
+        List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.id());
+        List<Double> hrData = activityService.getHeartRateStream(streams);
+        String zonaDominante = activityService.calculateDominantZoneSummary(hrData);
+        List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, zones);
         
-        System.out.println("=== [MOTOR EM STANDBY] ===\n");
+        String insight = insightService.getActivityInsight(activity, minuteAnalysis);
+        
+        if (isValidInsight(insight)) {
+            telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.name() + "\n\n" + insight);
+            activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
+        } else {
+            // Salva sem insight para a recoveryTask tentar depois
+            activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
+            System.err.println("   [GEMINI] Falha temporária. Atividade salva para análise posterior.");
+        }
+    }
+
+    private void garantirEEnviarUltimoInsight() {
+        activityRepository.findLastActivities(PageRequest.of(0, 1)).stream().findFirst().ifPresent(activity -> {
+            String insight = activity.getGeminiInsight();
+            
+            if (!isValidInsight(insight)) {
+                System.out.println("   [GEMINI] Tentando gerar análise para: " + activity.getName());
+                insight = insightService.getActivityInsightFromEntity(activity);
+                
+                if (isValidInsight(insight)) {
+                    activity.setGeminiInsight(insight);
+                    activityRepository.save(activity);
+                    telegramClient.sendMessage("FEEDBACK DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight);
+                    System.out.println("   [TELEGRAM] Insight pendente enviado com sucesso.");
+                } else {
+                    System.out.println("   [GEMINI] Falha na tentativa de recuperação. Tentaremos novamente em breve.");
+                }
+            }
+        });
+    }
+
+    private boolean isValidInsight(String insight) {
+        return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
+    }
+
+    private void renovarToken() {
+        try {
+            TokenResponse novoToken = authService.refreshToken(refreshToken);
+            this.accessToken = novoToken.getAccessToken();
+            System.out.println("Token renovado.");
+        } catch (Exception e) {
+            System.err.println("Erro na renovação do token.");
+        }
     }
 }

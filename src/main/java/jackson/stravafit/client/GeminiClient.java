@@ -20,6 +20,10 @@ public class GeminiClient {
     }
 
     public String getInsight(String prompt) {
+        return getInsightWithRetry(prompt, 3); // Tenta até 3 vezes
+    }
+
+    private String getInsightWithRetry(String prompt, int retries) {
         Map<String, Object> requestBody = Map.of(
             "contents", List.of(
                 Map.of("parts", List.of(
@@ -28,29 +32,38 @@ public class GeminiClient {
             )
         );
 
-        try {
-            // Usando o alias 'gemini-flash-latest' que apareceu na sua lista
-            Map<String, Object> response = restClient.post()
-                    .uri("/v1beta/models/gemini-flash-latest:generateContent?key={key}", apiKey)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(Map.class);
+        for (int i = 0; i < retries; i++) {
+            try {
+                // Trocando para gemini-pro-latest para maior estabilidade
+                Map<String, Object> response = restClient.post()
+                        .uri("/v1beta/models/gemini-pro-latest:generateContent?key={key}", apiKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .retrieve()
+                        .body(Map.class);
 
-            return extractTextFromResponse(response);
-        } catch (Exception e) {
-            if (e.getMessage().contains("429")) {
-                return "Limite de requisições atingido (Quota 429). Tente aumentar o intervalo entre treinos.";
+                return extractTextFromResponse(response);
+            } catch (Exception e) {
+                System.err.println("   [GEMINI] Tentativa " + (i + 1) + " falhou: " + e.getMessage());
+                
+                if (e.getMessage().contains("429") || e.getMessage().contains("503")) {
+                    try {
+                        Thread.sleep(5000L * (i + 1));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                } else {
+                    break;
+                }
             }
-            return "Erro ao consultar o Gemini: " + e.getMessage();
         }
+        return "Erro persistente ao consultar o Gemini após várias tentativas.";
     }
 
     private String extractTextFromResponse(Map<String, Object> response) {
         try {
             List candidates = (List) response.get("candidates");
             if (candidates == null || candidates.isEmpty()) return "Nenhum insight gerado.";
-
             Map firstCandidate = (Map) candidates.get(0);
             Map content = (Map) firstCandidate.get("content");
             List parts = (List) content.get("parts");
