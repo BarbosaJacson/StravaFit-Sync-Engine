@@ -4,8 +4,9 @@ import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.StravaActivity;
 import org.springframework.stereotype.Service;
 
+import java.time.*;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class InsightService {
@@ -17,28 +18,55 @@ public class InsightService {
     }
 
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
-        String prompt = buildPrompt(activity, analysis);
+        // Cálculo do próximo dia de treino (Ter, Qui, Sab)
+        String proximoTreinoData = calcularProximaDataTreino(activity.startDateLocal());
+
+        String prompt = buildProfessionalPrompt(activity, analysis, proximoTreinoData);
         return geminiClient.getInsight(prompt);
     }
 
-    private String buildPrompt(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
+    private String buildProfessionalPrompt(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis, String proximaData) {
+        
+        DateTimeFormatter parser = DateTimeFormatter.ISO_INSTANT;
+        ZonedDateTime date = ZonedDateTime.parse(activity.startDateLocal(), parser.withZone(ZoneId.of("America/Sao_Paulo")));
+        String dataFormatada = date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
+
         StringBuilder sb = new StringBuilder();
-        sb.append("Analise o seguinte treino de ").append(activity.sportType()).append(" no Strava:\n");
-        sb.append("- Nome: ").append(activity.name()).append("\n");
-        sb.append("- Distância: ").append(String.format("%.2f km", activity.distanceKm())).append("\n");
-        sb.append("- Tempo Total: ").append(activity.elapsedTimeMinutes()).append(" minutos\n");
-        sb.append("- FC Média: ").append(activity.averageHeartRate()).append(" bpm\n");
-        sb.append("- FC Máxima: ").append(activity.maxHeartRate()).append(" bpm\n\n");
+        
+        sb.append("--- INSTRUÇÃO DE FORMATAÇÃO: NÃO USE ASTERISCOS (*) OU SÍMBOLOS DE MARKDOWN. USE APENAS TÍTULOS EM LETRAS MAIÚSCULAS E TRAÇOS PARA SEPARAR SEÇÕES ---\n\n");
+        
+        sb.append("DATA E HORA DO TREINO: ").append(dataFormatada).append("\n\n");
 
-        sb.append("Detalhamento por minuto (Amostra):\n");
-        // Mandamos apenas os primeiros 20 minutos ou o que couber para não estourar o limite de tokens desnecessariamente
-        analysis.stream().limit(30).forEach(m -> {
-            sb.append(String.format("Min %d: FC %.0f bpm, Zona %d, Elevação %.1f m\n", 
-                m.minute(), m.averageHeartRate(), m.zone(), m.averageElevation()));
-        });
+        sb.append("ETAPA 1: ANALISE DO TREINO ATUAL\n");
+        sb.append("DADOS: ").append(activity.name()).append(" | ").append(String.format("%.1f km", activity.distanceKm())).append("\n");
+        sb.append("PARAMETROS ZONA ALVO Z2: 127-138 BPM\n\n");
+        
+        sb.append("SERIE TEMPORAL (Min: BPM/Alt/Cad):\n");
+        // Amostragem para economizar tokens
+        for (int i = 0; i < analysis.size(); i += 2) {
+            StravaActivity.MinuteAnalysis m = analysis.get(i);
+            sb.append(String.format("%d:%.0f/%.0fm/%.0f | ", m.minute(), m.averageHeartRate(), m.averageElevation(), m.averageCadence()));
+        }
 
-        sb.append("\nCom base nesses dados e nas zonas de Karvonen (Z1-Z5), forneça um insight técnico, motivacional e curto (máximo 4 parágrafos) sobre a performance e o condicionamento do atleta.");
+        sb.append("\n\nETAPA 2: FEEDBACK E PRESCRIÇÃO\n");
+        sb.append("1. Diagnóstico sincero do controle Z2 e análise de picos vs terreno.\n");
+        sb.append("2. PRESCRIÇÃO PARA O PRÓXIMO TREINO EM: ").append(proximaData).append("\n");
+        sb.append("   (Defina Distância, Ritmo e Forma de Execução para esta data específica).\n");
+        sb.append("3. Sugestão de Treino de Choque semanal (HIIT/VO2) se necessário.\n");
         
         return sb.toString();
+    }
+
+    private String calcularProximaDataTreino(String dataAtualStr) {
+        LocalDate hoje = ZonedDateTime.parse(dataAtualStr).toLocalDate();
+        LocalDate proximo = hoje.plusDays(1);
+        
+        while (proximo.getDayOfWeek() != DayOfWeek.TUESDAY && 
+               proximo.getDayOfWeek() != DayOfWeek.THURSDAY && 
+               proximo.getDayOfWeek() != DayOfWeek.SATURDAY) {
+            proximo = proximo.plusDays(1);
+        }
+        
+        return proximo.format(DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy"));
     }
 }

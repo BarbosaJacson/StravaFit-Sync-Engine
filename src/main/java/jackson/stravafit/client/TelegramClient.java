@@ -20,19 +20,33 @@ public class TelegramClient {
     }
 
     public void sendMessage(String text) {
+        // Limite do Telegram é 4096. Vamos usar 4000 para segurança.
+        int maxLength = 4000;
+        
         try {
-            restClient.post()
-                    .uri("/sendMessage")
-                    .body(Map.of(
-                            "chat_id", chatId,
-                            "text", text,
-                            "parse_mode", "Markdown"
-                    ))
-                    .retrieve()
-                    .toBodilessEntity();
-            System.out.println("   [TELEGRAM] Insight enviado com sucesso!");
+            if (text.length() <= maxLength) {
+                sendToTelegram(text);
+            } else {
+                // Quebra a mensagem em partes
+                for (int i = 0; i < text.length(); i += maxLength) {
+                    int end = Math.min(i + maxLength, text.length());
+                    sendToTelegram(text.substring(i, end));
+                }
+            }
         } catch (Exception e) {
             System.err.println("   [TELEGRAM] Erro ao enviar mensagem: " + e.getMessage());
         }
+    }
+
+    private void sendToTelegram(String text) {
+        restClient.post()
+                .uri("/sendMessage")
+                .body(Map.of(
+                        "chat_id", chatId,
+                        "text", text
+                ))
+                .retrieve()
+                .toBodilessEntity();
+        System.out.println("   [TELEGRAM] Parte da mensagem enviada com sucesso!");
     }
 }
