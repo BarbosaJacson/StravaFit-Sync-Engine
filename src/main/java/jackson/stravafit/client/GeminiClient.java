@@ -34,9 +34,9 @@ public class GeminiClient {
 
         for (int i = 0; i < retries; i++) {
             try {
-                // Trocando para gemini-pro-latest para maior estabilidade
+                // Trocando para gemini-2.5-flash, que estava na sua lista de modelos disponíveis
                 Map<String, Object> response = restClient.post()
-                        .uri("/v1beta/models/gemini-pro-latest:generateContent?key={key}", apiKey)
+                        .uri("/v1beta/models/gemini-2.5-flash:generateContent?key={key}", apiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(requestBody)
                         .retrieve()
