@@ -77,8 +77,12 @@ public class SyncScheduler {
             return true;
 
         } catch (HttpClientErrorException.Unauthorized e) {
-            renovarToken();
-            return executarSincronizacao(this.accessToken);
+            if (renovarToken()) {
+                return executarSincronizacao(this.accessToken);
+            } else {
+                System.err.println("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
+                return false;
+            }
         } catch (Exception e) {
             System.err.println("ERRO NA SINCRONIZAÇÃO: " + e.getMessage());
             return false;
@@ -98,7 +102,6 @@ public class SyncScheduler {
             telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.name() + "\n\n" + insight);
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
         } else {
-            // Salva sem insight para a recoveryTask tentar depois
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
             System.err.println("   [GEMINI] Falha temporária. Atividade salva para análise posterior.");
         }
@@ -120,6 +123,10 @@ public class SyncScheduler {
                 } else {
                     System.out.println("   [GEMINI] Falha na tentativa de recuperação. Tentaremos novamente em breve.");
                 }
+            } else {
+                String lembrete = "RELEMBRANDO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight;
+                telegramClient.sendMessage(lembrete);
+                System.out.println("   [TELEGRAM] Lembrete enviado: " + activity.getName());
             }
         });
     }
@@ -128,13 +135,15 @@ public class SyncScheduler {
         return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
     }
 
-    private void renovarToken() {
+    private boolean renovarToken() {
         try {
             TokenResponse novoToken = authService.refreshToken(refreshToken);
             this.accessToken = novoToken.getAccessToken();
             System.out.println("Token renovado.");
+            return true;
         } catch (Exception e) {
-            System.err.println("Erro na renovação do token.");
+            System.err.println("ERRO CRÍTICO na renovação do token: " + e.getMessage());
+            return false;
         }
     }
 }
