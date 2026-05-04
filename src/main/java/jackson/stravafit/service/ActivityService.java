@@ -1,13 +1,18 @@
 package jackson.stravafit.service;
 
 import jackson.stravafit.client.StravaClient;
+import jackson.stravafit.config.AthleteConfig;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.model.MinuteAnalysisEntity;
 import jackson.stravafit.repository.ActivityRepository;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -15,22 +20,14 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Collections;
 
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class ActivityService {
 
     private final StravaClient stravaClient;
     private final ActivityRepository activityRepository;
-
-    @Value("${atleta.hr-max}")
-    private int hrMax;
-
-    @Value("${atleta.hr-resting}")
-    private int hrResting;
-
-    public ActivityService(StravaClient stravaClient, ActivityRepository activityRepository) {
-        this.stravaClient = stravaClient;
-        this.activityRepository = activityRepository;
-    }
+    private final AthleteConfig athleteConfig;
 
     /**
      * Recupera atividades do Strava e filtra apenas aquelas que possuem monitoramento de batimento cardíaco válido.
@@ -76,7 +73,9 @@ public class ActivityService {
         ActivityEntity entity = ActivityEntity.builder()
                 .id(activity.id())
                 .name(activity.name())
-                .startDate(activity.startDateLocal())
+                .startDate(activity.startDateLocal() != null 
+                        ? OffsetDateTime.parse(activity.startDateLocal()).toLocalDateTime() 
+                        : null)
                 .distanceKm(activity.distanceKm())
                 .averageHeartRate(activity.averageHeartRate())
                 .maxHeartRate(activity.maxHeartRate())
@@ -176,10 +175,10 @@ public class ActivityService {
     }
 
     private int calculateKarvonenZone(double bpm) {
-        int hrReserve = hrMax - hrResting;
+        int hrReserve = athleteConfig.getHrMax() - athleteConfig.getHrResting();
         if (hrReserve <= 0) return 0;
 
-        double intensity = (bpm - hrResting) / hrReserve;
+        double intensity = (bpm - athleteConfig.getHrResting()) / hrReserve;
 
         if (intensity >= 0.90) return 5; // Z5: 90-100%
         if (intensity >= 0.80) return 4; // Z4: 80-90%

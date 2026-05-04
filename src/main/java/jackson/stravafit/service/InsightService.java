@@ -3,7 +3,6 @@ package jackson.stravafit.service;
 import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
-import jackson.stravafit.model.MinuteAnalysisEntity;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -15,12 +14,19 @@ import java.util.List;
 @RequiredArgsConstructor
 public class InsightService {
 
+    private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
+    private static final DateTimeFormatter BRAZIL_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+    private static final DateTimeFormatter NEXT_WORKOUT_FORMATTER = DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy");
+
+    private static final String NO_MARKDOWN_INSTRUCTION = 
+        "--- INSTRUÇÃO DE FORMATAÇÃO: NÃO USE ASTERISCOS (*) OU SÍMBOLOS DE MARKDOWN. USE APENAS TÍTULOS EM LETRAS MAIÚSCULAS E TRAÇOS PARA SEPARAR SEÇÕES ---\n\n";
+
     private final GeminiClient geminiClient;
 
     // Gerador de recomendação pré-treino baseado no sono
     public String getPreWorkoutRecommendation(String sleepQuality) {
         StringBuilder sb = new StringBuilder();
-        sb.append("--- INSTRUÇÃO DE FORMATAÇÃO: NÃO USE ASTERISCOS (*) OU SÍMBOLOS DE MARKDOWN. USE APENAS TÍTULOS EM LETRAS MAIÚSCULAS E TRAÇOS PARA SEPARAR SEÇÕES ---\n\n");
+        sb.append(NO_MARKDOWN_INSTRUCTION);
         sb.append("AVALIAÇÃO PRÉ-TREINO: CONDIÇÕES FISIOLÓGICAS\n\n");
         sb.append("SITUAÇÃO DO SONO: ").append(sleepQuality.toUpperCase()).append("\n\n");
         sb.append("TAREFA:\n");
@@ -32,8 +38,9 @@ public class InsightService {
     }
 
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
-        String proximoTreinoData = calcularProximaDataTreino(activity.startDateLocal());
-        String prompt = buildProfessionalPrompt(activity.name(), activity.distanceKm(), activity.startDateLocal(), analysis, proximoTreinoData);
+        ZonedDateTime activityDate = parseToZonedDateTime(activity.startDateLocal());
+        String proximoTreinoData = calcularProximaDataTreino(activityDate);
+        String prompt = buildProfessionalPrompt(activity.name(), activity.distanceKm(), activityDate, analysis, proximoTreinoData);
         return geminiClient.getInsight(prompt);
     }
 
@@ -42,19 +49,18 @@ public class InsightService {
                 .map(m -> new StravaActivity.MinuteAnalysis(m.getMinute(), m.getAverageHeartRate(), m.getMaxHeartRate(), m.getZone(), m.getAverageElevation(), m.getAverageCadence()))
                 .toList();
 
-        String proximoTreinoData = calcularProximaDataTreino(entity.getStartDate());
-        String prompt = buildProfessionalPrompt(entity.getName(), entity.getDistanceKm(), entity.getStartDate(), analysis, proximoTreinoData);
+        ZonedDateTime activityDate = entity.getStartDate().atZone(ZONE_SP);
+        String proximoTreinoData = calcularProximaDataTreino(activityDate);
+        String prompt = buildProfessionalPrompt(entity.getName(), entity.getDistanceKm(), activityDate, analysis, proximoTreinoData);
         return geminiClient.getInsight(prompt);
     }
 
-    private String buildProfessionalPrompt(String name, Double distance, String startDate, List<StravaActivity.MinuteAnalysis> analysis, String proximaData) {
-        // Usamos o método auxiliar para parsear corretamente o horário
-        ZonedDateTime date = parseToZonedDateTime(startDate);
-        String dataFormatada = date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
+    private String buildProfessionalPrompt(String name, Double distance, ZonedDateTime date, List<StravaActivity.MinuteAnalysis> analysis, String proximaData) {
+        String dataFormatada = date.format(BRAZIL_FORMATTER);
 
         StringBuilder sb = new StringBuilder();
 
-        sb.append("--- INSTRUÇÃO DE FORMATAÇÃO: O RETORNO DEVE SER COESO, ORGANIZADO E BEM FORMATADO, UTILIZANDO TÍTULOS E SUBTÍTULOS EM LETRAS MAIÚSCULAS. NÃO USE ASTERISCOS OU OUTROS SÍMBOLOS DE MARKDOWN. ---\n\n");
+        sb.append(NO_MARKDOWN_INSTRUCTION);
         
         sb.append("DATA E HORA DO TREINO: ").append(dataFormatada).append("\n\n");
 
@@ -87,13 +93,13 @@ public class InsightService {
         return sb.toString();
     }
 
-    private String calcularProximaDataTreino(String dataAtualStr) {
-        LocalDate hoje = parseToZonedDateTime(dataAtualStr).toLocalDate();
+    private String calcularProximaDataTreino(ZonedDateTime date) {
+        LocalDate hoje = date.toLocalDate();
         LocalDate proximo = hoje.plusDays(1);
         while (proximo.getDayOfWeek() != DayOfWeek.TUESDAY && proximo.getDayOfWeek() != DayOfWeek.THURSDAY && proximo.getDayOfWeek() != DayOfWeek.SATURDAY) {
             proximo = proximo.plusDays(1);
         }
-        return proximo.format(DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy"));
+        return proximo.format(NEXT_WORKOUT_FORMATTER);
     }
 
     private ZonedDateTime parseToZonedDateTime(String dateStr) {
@@ -103,9 +109,10 @@ public class InsightService {
         
         // Pegamos apenas os primeiros 19 caracteres (yyyy-MM-ddTHH:mm:ss)
         // Isso remove o 'Z' ou qualquer offset, tratando o tempo como local puro.
-        String localPart = dateStr.substring(0, 19);
+        // Verificação de segurança adicionada
+        String localPart = (dateStr != null && dateStr.length() >= 19) ? dateStr.substring(0, 19) : dateStr;
         
-        return LocalDateTime.parse(localPart, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                .atZone(ZoneId.of("America/Sao_Paulo"));
+        return LocalDateTime.parse(localPart, DateTimeFormatter.ISO_DATE_TIME)
+                .atZone(ZONE_SP);
     }
 }
