@@ -73,9 +73,7 @@ public class ActivityService {
         ActivityEntity entity = ActivityEntity.builder()
                 .id(activity.id())
                 .name(activity.name())
-                .startDate(activity.startDateLocal() != null 
-                        ? OffsetDateTime.parse(activity.startDateLocal()).toLocalDateTime() 
-                        : null)
+                .startDate(activity.startDateLocal())
                 .distanceKm(activity.distanceKm())
                 .averageHeartRate(activity.averageHeartRate())
                 .maxHeartRate(activity.maxHeartRate())

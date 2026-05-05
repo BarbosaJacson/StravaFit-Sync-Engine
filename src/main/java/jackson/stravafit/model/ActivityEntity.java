@@ -2,7 +2,6 @@ package jackson.stravafit.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.ArrayList;
 
@@ -19,7 +18,7 @@ public class ActivityEntity {
     @Column(name = "name")
     private String name;
     @Column(name = "start_date")
-    private LocalDateTime startDate;
+    private String startDate;
     private Double distanceKm;
     private Double averageHeartRate;
     private Double maxHeartRate;

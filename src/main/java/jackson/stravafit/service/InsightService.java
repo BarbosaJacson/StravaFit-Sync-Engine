@@ -49,7 +49,7 @@ public class InsightService {
                 .map(m -> new StravaActivity.MinuteAnalysis(m.getMinute(), m.getAverageHeartRate(), m.getMaxHeartRate(), m.getZone(), m.getAverageElevation(), m.getAverageCadence()))
                 .toList();
 
-        ZonedDateTime activityDate = entity.getStartDate().atZone(ZONE_SP);
+        ZonedDateTime activityDate = parseToZonedDateTime(entity.getStartDate());
         String proximoTreinoData = calcularProximaDataTreino(activityDate);
         String prompt = buildProfessionalPrompt(entity.getName(), entity.getDistanceKm(), activityDate, analysis, proximoTreinoData);
         return geminiClient.getInsight(prompt);
