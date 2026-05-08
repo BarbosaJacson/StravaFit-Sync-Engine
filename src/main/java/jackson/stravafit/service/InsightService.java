@@ -66,11 +66,11 @@ public class InsightService {
 
         sb.append("ETAPA 1: ANALISE DO TREINO ATUAL\n");
         sb.append("DADOS DO TREINO: ").append(name).append(" | ").append(String.format("%.1f km", distance)).append("\n");
-        sb.append("PARAMETROS DE REFERENCIA: Z2 (127 - 137 BPM), Teto 138 BPM.\n\n");
+        sb.append("PARAMETROS DE REFERENCIA: Z2 (127 - 137 BPM), Teto 138 BPM. OBJETIVO TÉCNICO: Permanecer na Z2 por pelo menos 75% do tempo.\n\n");
         
         sb.append("SERIE TEMPORAL (Min: BPM/Alt/Cad):\n");
         analysis.stream()
-                .filter(m -> m.minute() % 2 == 0) // Amostragem a cada 2 minutos para economizar tokens
+                .filter(m -> m.minute() % 2 == 0)
                 .forEach(m -> sb.append(String.format("%d:%.0f/%.0fm/%.0f | ", 
                         m.minute(), m.averageHeartRate(), m.averageElevation(), m.averageCadence())));
 
@@ -83,6 +83,7 @@ public class InsightService {
         sb.append("- Calculo do Desacoplamento Aerobico (Cardiac Drift): Comparar 1a vs 2a metade do treino. Se > 5%, sinalizar deriva.\n");
         sb.append("- Analise de GAP: Cruzar BPM com altimetria. Validar esforço em subidas.\n");
         sb.append("- Indicadores de Economia de Corrida: Correlacionar cadência com controle de BPM em Z2.\n\n");
+        sb.append("CONTEXTO DE AVALIAÇÃO: Se o atleta cumpriu o objetivo de >75% na zona, o treino é um SUCESSO. Não julgue negativamente variações pequenas (ex: <10%) acima do teto.\n\n");
 
         sb.append("ETAPA 2: FEEDBACK E PRESCRICAO TECNICA\n");
         sb.append("1. Diagnostico de Eficiencia Metabolica: Status da Z2 (Natural ou Forcado) e Analise de Fadiga Residual.\n");
