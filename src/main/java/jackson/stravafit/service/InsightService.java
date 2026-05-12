@@ -3,8 +3,11 @@ package jackson.stravafit.service;
 import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
+import jackson.stravafit.repository.ActivityRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.*;
@@ -21,32 +24,40 @@ public class InsightService {
     private static final DateTimeFormatter NEXT_WORKOUT_FORMATTER = DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy");
 
     private static final String NO_MARKDOWN_INSTRUCTION = 
-        "--- REGRAS: USE APENAS NEGRITO (**) PARA TÍTULOS. NÃO USE '#'. SEJA CURTO, TÉCNICO E USE TÓPICOS. RESPOSTA MÁXIMA: 250 PALAVRAS. ---\n\n";
+        "--- REGRAS DE SAÍDA OBRIGATÓRIAS ---\n" +
+        "1. EXCLUA TODO E QUALQUER MARKDOWN. PROIBIDO o uso de asteriscos (*), hífens (-) ou símbolos (#).\n" +
+        "2. FORMATAÇÃO: Use APENAS letras MAIÚSCULAS para títulos. Não use negrito.\n" +
+        "3. USE ESPAÇAMENTO ENTRE PARÁGRAFOS E LINHAS EM BRANCO PARA ORGANIZAR O TEXTO.\n\n";
 
     private static final int TETO_Z2_PADRAO = 138;
 
     private final GeminiClient geminiClient;
+    private final ActivityRepository activityRepository;
 
     // Gerador de recomendação pré-treino baseado no sono
     public String getPreWorkoutRecommendation(String sleepQuality) {
         log.info("Gerando recomendação pré-treino para qualidade de sono: {}", sleepQuality);
         StringBuilder sb = new StringBuilder();
         sb.append(NO_MARKDOWN_INSTRUCTION);
-        sb.append("**AVALIAÇÃO PRÉ-TREINO: CONDIÇÕES FISIOLÓGICAS**\n\n");
-        sb.append("**SONO**: ").append(sleepQuality.toUpperCase()).append("\n");
-        sb.append("**CONTEXTO**: Treino Z2 (objetivo >75% na zona) às 05:30.\n");
-        sb.append("**TAREFA**: Avalie o impacto fisiológico do sono e prescreva: Manter Plano, Reduzir Volume (50%) ou Descanso.\n");
+        sb.append("AVALIAÇÃO PRÉ-TREINO: CONDIÇÕES FISIOLÓGICAS\n\n");
+        sb.append("SITUAÇÃO DO SONO: ").append(sleepQuality.toUpperCase()).append("\n");
+        sb.append("CONTEXTO: Treino Z2 (objetivo >75% na zona) às 05:30.\n");
+        sb.append("TAREFA: Avalie o impacto fisiológico do sono e prescreva: Manter Plano, Reduzir Volume (50%) ou Descanso.\n");
         sb.append("Seja extremamente direto.");
         
-        return geminiClient.getInsight(sb.toString());
+        return sanitizeOutput(geminiClient.getInsight(sb.toString()));
     }
 
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
         log.info("Iniciando análise de insight para atividade Strava: {}", activity.name());
         ZonedDateTime activityDate = parseToZonedDateTime(activity.startDateLocal());
         String proximoTreinoData = calcularProximaDataTreino(activityDate);
-        String prompt = buildProfessionalPrompt(activity.name(), activity.distanceKm(), activityDate, analysis, proximoTreinoData);
-        return geminiClient.getInsight(prompt);
+
+        // Busca histórico para contexto
+        String contextoHistorico = buscarResumoTreinoAnterior(activity.id());
+
+        String prompt = buildProfessionalPrompt(activity.name(), activity.distanceKm(), activityDate, analysis, proximoTreinoData, contextoHistorico);
+        return sanitizeOutput(geminiClient.getInsight(prompt));
     }
 
     public String getActivityInsightFromEntity(ActivityEntity entity) {
@@ -62,11 +73,15 @@ public class InsightService {
 
         ZonedDateTime activityDate = parseToZonedDateTime(entity.getStartDate());
         String proximoTreinoData = calcularProximaDataTreino(activityDate);
-        String prompt = buildProfessionalPrompt(entity.getName(), entity.getDistanceKm(), activityDate, analysis, proximoTreinoData);
-        return geminiClient.getInsight(prompt);
+
+        // Busca histórico para contexto
+        String contextoHistorico = buscarResumoTreinoAnterior(entity.getId());
+
+        String prompt = buildProfessionalPrompt(entity.getName(), entity.getDistanceKm(), activityDate, analysis, proximoTreinoData, contextoHistorico);
+        return sanitizeOutput(geminiClient.getInsight(prompt));
     }
 
-    private String buildProfessionalPrompt(String name, Double distance, ZonedDateTime date, List<StravaActivity.MinuteAnalysis> analysis, String proximaData) {
+    private String buildProfessionalPrompt(String name, Double distance, ZonedDateTime date, List<StravaActivity.MinuteAnalysis> analysis, String proximaData, String historico) {
         log.debug("Construindo prompt profissional para '{}' do dia {}", name, date);
         String dataFormatada = date.format(BRAZIL_FORMATTER);
 
@@ -75,13 +90,15 @@ public class InsightService {
 
         sb.append(NO_MARKDOWN_INSTRUCTION);
         
-        sb.append("**RELATÓRIO DE ANÁLISE DE TREINO**\n\n");
-        sb.append("DATA: ").append(dataFormatada).append("\n");
+        sb.append("RELATÓRIO DE ANÁLISE DE TREINO\n\n");
+        sb.append("DATA E HORA: ").append(dataFormatada).append("\n");
+        sb.append("DADOS DO TREINO: ").append(name).append(" | ").append(String.format("%.1f KM", safeDistance)).append("\n");
+        
+        sb.append(String.format("PARAMETROS DE REFERENCIA: Z2 (127 - %d BPM), Teto %d BPM. OBJETIVO TECNICO: Permanecer na Z2 por pelo menos 75%% do tempo.\n\n", TETO_Z2_PADRAO - 1, TETO_Z2_PADRAO));
+        
+        sb.append("CONTEXTO HISTÓRICO:\n");
+        sb.append(historico != null ? historico : "Nenhum histórico anterior disponível para comparação.").append("\n\n");
 
-        sb.append("DADOS DO TREINO: ").append(name).append(" | ").append(String.format("%.1f km", safeDistance)).append("\n");
-        
-        sb.append(String.format("PARAMETROS DE REFERENCIA: Z2 (127 - 137 BPM), Teto %d BPM. OBJETIVO TÉCNICO: Permanecer na Z2 por pelo menos 75%% do tempo.\n\n", TETO_Z2_PADRAO));
-        
         sb.append("SERIE TEMPORAL (Min: BPM/Alt/Cad):\n");
         analysis.stream()
                 .filter(m -> m.minute() % 2 == 0)
@@ -92,21 +109,42 @@ public class InsightService {
         long tempoAcimaTeto = analysis.stream().filter(m -> m.averageHeartRate() > TETO_Z2_PADRAO).count();
         double percentualAcima = analysis.isEmpty() ? 0 : (tempoAcimaTeto * 100.0) / analysis.size();
 
-        sb.append("\n**ETAPA 1: ANALISE TÉCNICA SUCINTA**\n");
-        sb.append(String.format("- **ZONAS**: %.1f%% acima do teto de %d BPM.\n", percentualAcima, TETO_Z2_PADRAO));
-        sb.append("- **RITMO (PACE)**: Calcule o pace médio (min/km). Correlacione o aumento do BPM com o pace e a altimetria.\n");
-        sb.append("- **CARDIAC DRIFT**: Deriva entre 1a e 2a metade (Teto 5%).\n");
-        sb.append("- **CORRELAÇÃO**: O aumento de BPM foi por ladeira, aumento de ritmo ou perda de eficiência?\n");
-        sb.append("- **ECONOMIA**: Cadência vs BPM.\n");
-        sb.append("**AVALIAÇÃO**: Se >75% em Z2, o treino é um SUCESSO. Não critique variações <10%.\n\n");
+        sb.append("\nETAPA 1: ANALISE TECNICA DETALHADA E CORRELACAO DE VARIAVEIS\n");
+        sb.append(String.format("- ZONAS: %.1f%% do tempo total operando acima do teto de %d BPM.\n", percentualAcima, TETO_Z2_PADRAO));
 
-        sb.append("**ETAPA 2: DIAGNÓSTICO E PRESCRIÇÃO**\n");
-        sb.append("1. **DIAGNÓSTICO**: Eficiência Z2 e Fadiga.\n");
-        sb.append("2. **PRÓXIMO TREINO** (").append(proximaData).append("): Alvo de Distância e Pace.\n");
-        sb.append("3. **HIIT**: Apenas se houver prontidão.\n");
-        sb.append("4. **NUTRIÇÃO**: Foco em **PÓS-TREINO**, **HIDRATAÇÃO** e **SUPLEMENTAÇÃO**.\n");
+        sb.append("ANÁLISE DE DESEMPENHO CRONOLÓGICA: Analise a serie temporal e descreva a evolucao do treino em blocos de tempo. " +
+                "Identifique momentos especificos (ex: Minuto 10 ao 25). " +
+                "CORRELAÇÃO OBRIGATÓRIA: Relacione como a variação de ALTIMETRIA e PACE afetou o BPM e a permanência na ZONA. " +
+                "Determine se o aumento de esforço foi mecânico (subida/velocidade) ou fisiológico (fadiga).\n");
+
+        sb.append("CARDIAC DRIFT: Calcule a deriva cardiaca entre a primeira e segunda metade.\n");
+        sb.append("ECONOMIA MECANICA: Estabilidade da cadencia vs oscilacoes de FC.\n");
+        sb.append("AVALIACAO TECNICA FINAL: Classifique como SUCESSO se >75% na Z2.\n\n");
+
+        sb.append("ETAPA 2: DIAGNOSTICO E PRESCRICAO\n");
+        
+        if (historico != null) {
+            sb.append("1. AUDITORIA DE EXECUÇÃO: Compare a distância e zona de hoje com a meta estipulada no INSIGHT ANTERIOR. O atleta cumpriu o planejado?\n");
+        } else {
+            sb.append("1. AUDITORIA: Analise se a intensidade foi condizente com um treino de base.\n");
+        }
+        
+        sb.append("2. DIAGNOSTICO: Eficiencia da Z2 e analise de fadiga acumulada.\n");
+        sb.append("3. PLANEJAMENTO PARA O PROXIMO TREINO (").append(proximaData).append("): Ajuste distancia e pace alvo baseado no desempenho de hoje.\n");
+        sb.append("4. NUTRICAO CONTEXTUAL: Recomendacoes curtas de POS-TREINO, HIDRATACAO e SUPLEMENTACAO.\n\n");
+
+        sb.append("LEMBRETE: NAO USE SIBOLOS DE MARKDOWN. USE APENAS TEXTO BRUTO E ESPACAMENTO.");
 
         return sb.toString();
+    }
+
+    public String buscarResumoTreinoAnterior(Long currentId) {
+        return activityRepository.findAll(PageRequest.of(0, 1, Sort.by(Sort.Direction.DESC, "id")))
+                .stream()
+                .filter(a -> !a.getId().equals(currentId))
+                .map(a -> "TREINO ANTERIOR: " + a.getName() + " em " + a.getStartDate() + ". INSIGHT ANTERIOR: " + a.getGeminiInsight())
+                .findFirst()
+                .orElse(null);
     }
 
     private String calcularProximaDataTreino(ZonedDateTime date) {
@@ -116,6 +154,14 @@ public class InsightService {
             proximo = proximo.plusDays(1);
         }
         return proximo.format(NEXT_WORKOUT_FORMATTER);
+    }
+
+    private String sanitizeOutput(String text) {
+        if (text == null) return "";
+        // Remove asteriscos, hashtags e hífens repetidos que a IA usa para listas
+        return text.replaceAll("[*#]", "")
+                   .replaceAll("(?m)^\\s*-\\s*", "  ") // Transforma hífens de lista em espaços
+                   .trim();
     }
 
     private ZonedDateTime parseToZonedDateTime(String dateStr) {

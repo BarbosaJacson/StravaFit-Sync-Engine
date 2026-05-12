@@ -1,0 +1,86 @@
+@startuml
+!theme plain
+
+' Definição de Estilos para as Camadas
+skinparam component {
+  BackgroundColor<<Orchestration>> LightBlue
+  BorderColor<<Orchestration>> Blue
+  BackgroundColor<<Logic>> LightGreen
+  BorderColor<<Logic>> Green
+  BackgroundColor<<Integration>> LightYellow
+  BorderColor<<Integration>> Orange
+  BackgroundColor<<Data>> LightGray
+  BorderColor<<Data>> Gray
+  BackgroundColor<<External>> LightCoral
+  BorderColor<<External>> Red
+  BackgroundColor<<Config>> LightCyan
+  BorderColor<<Config>> Cyan
+}
+
+' Título do Diagrama
+title Arquitetura de Componentes - StravaFit Sync Engine
+
+' Camada de Orquestração
+component SyncScheduler <<Orchestration>> as "SyncScheduler\n(Maestro/Maître)"
+
+' Camada de Lógica
+component ActivityService <<Logic>> as "ActivityService\n(Fisiologista/Data Scientist)"
+component InsightService <<Logic>> as "InsightService\n(Head Coach/Estrategista)"
+
+' Camada de Integração
+component StravaClient <<Integration>> as "StravaClient"
+component GeminiClient <<Integration>> as "GeminiClient"
+component TelegramClient <<Integration>> as "TelegramClient"
+component StravaAuthService <<Integration>> as "StravaAuthService"
+
+' Camada de Dados
+component ActivityRepository <<Data>> as "ActivityRepository\n(Gerente da Despensa)"
+component ActivityEntity <<Data>> as "ActivityEntity\n(Ficha Cadastral)"
+component MinuteAnalysisEntity <<Data>> as "MinuteAnalysisEntity\n(Detalhes por Minuto)"
+
+' Camada de Configuração
+component AthleteConfig <<Config>> as "AthleteConfig\n(Parâmetros do Atleta)"
+
+' Sistemas Externos
+cloud "Strava API" <<External>> as StravaAPI
+cloud "Gemini API" <<External>> as GeminiAPI
+cloud "Telegram API" <<External>> as TelegramAPI
+database "MySQL DB\n(Docker Container)" <<External>> as MySQLDB
+
+' Interações e Fluxos
+
+' Orquestração
+SyncScheduler --> StravaAuthService : 1. Renova Token
+SyncScheduler --> ActivityService : 2. Busca/Processa Atividades
+SyncScheduler --> InsightService : 3. Gera Insights (Pré/Pós Treino)
+SyncScheduler --> TelegramClient : 4. Envia Notificações
+SyncScheduler --> ActivityRepository : 5. Verifica/Salva Atividades
+
+' Lógica
+ActivityService --> StravaClient : Busca Dados Brutos
+ActivityService --> ActivityRepository : Persiste ActivityEntity
+ActivityService --> AthleteConfig : Lê Parâmetros (FC Max/Repouso)
+ActivityService --> ActivityEntity : Mapeia para Entidade
+ActivityService --> MinuteAnalysisEntity : Mapeia para Entidade
+
+InsightService --> GeminiClient : Envia Prompt para IA
+InsightService --> ActivityRepository : Busca Histórico (Contexto)
+InsightService --> AthleteConfig : Lê Parâmetros (FC Max/Repouso)
+InsightService --> ActivityEntity : Lê Entidade
+InsightService --> MinuteAnalysisEntity : Lê Entidade
+
+' Relacionamento entre Entidades
+ActivityEntity "1" -- "N" MinuteAnalysisEntity : possui
+
+' Integração
+StravaClient --> StravaAPI : Requisições HTTP
+GeminiClient --> GeminiAPI : Requisições HTTP
+TelegramClient --> TelegramAPI : Requisições HTTP
+StravaAuthService --> StravaAPI : Autenticação OAuth
+
+' Dados
+ActivityRepository --> MySQLDB : Operações CRUD
+ActivityEntity --> MySQLDB : Mapeamento ORM
+MinuteAnalysisEntity --> MySQLDB : Mapeamento ORM
+
+@enduml
