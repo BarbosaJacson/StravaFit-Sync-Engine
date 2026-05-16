@@ -10,16 +10,16 @@ import java.util.Map;
 @Service
 public class StravaAuthService {
 
-    @Value("${strava.client.id}")
-    private String clientId;
-
-    @Value("${strava.client.secret}")
-    private String clientSecret;
-
+    private final String clientId;
+    private final String clientSecret;
     private final RestClient restClient;
 
-    public StravaAuthService(RestClient.Builder builder) {
+    public StravaAuthService(RestClient.Builder builder,
+                             @Value("${strava.client.id}") String clientId,
+                             @Value("${strava.client.secret}") String clientSecret) {
         this.restClient = builder.baseUrl("https://www.strava.com").build();
+        this.clientId = clientId;
+        this.clientSecret = clientSecret;
     }
 
     public TokenResponse refreshToken(String currentRefreshToken) {

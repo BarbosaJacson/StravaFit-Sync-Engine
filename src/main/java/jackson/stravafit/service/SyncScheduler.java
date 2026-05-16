@@ -5,7 +5,6 @@ import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.TokenResponse;
 import jackson.stravafit.repository.ActivityRepository;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -19,7 +18,6 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Random;
 
-@Slf4j
 @Service
 public class SyncScheduler {
 
@@ -49,7 +47,7 @@ public class SyncScheduler {
 
     @EventListener(ApplicationReadyEvent.class)
     public void syncOnStartup() {
-        log.info("[STARTUP] Conexão estabelecida. Sincronizando atividades e verificando pendências...");
+        System.out.println("   [STARTUP] Iniciando motor e verificando pendências...");
         String sleepQuality = simulateSleepQuality();
         executarSincronizacao(this.accessToken, sleepQuality);
     }
@@ -57,9 +55,29 @@ public class SyncScheduler {
     // AGENDAMENTO ÚNICO: Ter, Qui, Sab às 07:00 (Relatório Consolidado)
     @Scheduled(cron = "0 0 7 * * TUE,THU,SAT")
     public void scheduledSync() {
-        log.info("=== [RELATÓRIO MATINAL 07:00] ===");
+        System.out.println("=== [RELATÓRIO MATINAL 07:00] ===");
         String sleepQuality = simulateSleepQuality();
         executarSincronizacao(this.accessToken, sleepQuality);
+    }
+
+    // NOVO AGENDAMENTO: Ter, Qui, Sab às 05:05 (Checagem de Sono e Plano Pré-Treino)
+    @Scheduled(cron = "0 5 5 * * TUE,THU,SAT")
+    public void scheduledSleepCheck() {
+        System.out.println("=== [AGENDAMENTO AUTOMÁTICO DISPARADO - PRÉ-TREINO] ===");
+        System.out.println("   [SONO] Avaliando qualidade do sono para o treino de hoje...");
+        
+        String sleepQuality = simulateSleepQuality(); // Simula a qualidade do sono
+        String preWorkoutRecommendation = insightService.getPreWorkoutRecommendation(sleepQuality);
+        
+        telegramClient.sendMessage("AVALIAÇÃO PRÉ-TREINO (" + LocalDate.now() + "):\n\n" + preWorkoutRecommendation);
+        System.out.println("   [TELEGRAM] Recomendação pré-treino enviada com base no sono.");
+    }
+
+    // TAREFA DE RECUPERAÇÃO: Tenta "curar" atividades sem insight a cada 1 hora
+    @Scheduled(cron = "0 0 * * * *")
+    public void recoveryTask() {
+        System.out.println("   [RECOVERY] Verificando se há treinos pendentes de análise...");
+        garantirEEnviarUltimoInsight();
     }
 
     private boolean executarSincronizacao(String tokenParaUsar, String sleepQuality) {
@@ -67,7 +85,7 @@ public class SyncScheduler {
         try {
             ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(tokenParaUsar, 1);
             if (response.activities().isEmpty()) {
-                log.warn("[STRAVA] Nenhuma atividade compatível encontrada recentemente.");
+                System.out.println("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
                 garantirEEnviarUltimoInsight(); // Tenta recuperar pendências mesmo sem treino novo
                 return false;
             }
@@ -87,20 +105,20 @@ public class SyncScheduler {
                         : LocalDate.parse(dateStr.substring(0, 10));
 
                 if (activityDate.isEqual(today)) {
-                    log.info("-> NOVO TREINO DETECTADO PARA O DIA: {}", activity.name());
+                    System.out.println("-> NOVO TREINO DETECTADO PARA O DIA: " + activity.name());
                     geminiDisponivel = processarEEnviar(tokenParaUsar, activity);
                     treinoHojeDetectado = true;
                 } else {
                     // CARGA HISTÓRICA: Se não é hoje e não está no banco, apenas persiste os dados
                     // Isso vai carregar suas 59 atividades gradualmente sem disparar 59 notificações
-                    log.info("-> Carregando atividade histórica para o banco: {} ({})", activity.name(), activityDate);
+                    System.out.println("-> Carregando atividade histórica para o banco: " + activity.name() + " (" + activityDate + ")");
                     persistirSemNotificar(tokenParaUsar, activity);
                 }
             }
 
             // Se terminamos de olhar a lista e ninguém foi "hoje"
             if (!treinoHojeDetectado) {
-                log.info("-> Nenhum treino detectado para hoje ({}). Enviando recomendação matinal.", today);
+                System.out.println("-> Nenhum treino detectado para hoje (" + today + "). Enviando recomendação matinal.");
                 enviarRecomendacaoPreTreino(today, sleepQuality);
             }
 
@@ -113,11 +131,11 @@ public class SyncScheduler {
             if (renovarToken()) {
                 return executarSincronizacao(this.accessToken, sleepQuality);
             } else {
-                log.error("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
+                System.err.println("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
                 return false;
             }
         } catch (Exception e) {
-            log.error("ERRO NA SINCRONIZAÇÃO: {}", e.getMessage());
+            System.err.println("ERRO NA SINCRONIZAÇÃO: " + e.getMessage());
             return false;
         }
     }
@@ -134,7 +152,7 @@ public class SyncScheduler {
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
         } else {
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
-            log.warn("[GEMINI] Falha temporária (503). Atividade salva para análise posterior.");
+            System.err.println("   [GEMINI] Falha temporária. Atividade salva para análise posterior.");
         }
         return success;
     }
@@ -144,7 +162,7 @@ public class SyncScheduler {
             DataProcessamento dados = buscarDadosCompletosAtividade(token, activity);
             activityService.saveActivity(activity, dados.minuteAnalysis(), dados.zonaDominante(), null);
         } catch (Exception e) {
-            log.error("Erro ao persistir atividade histórica {}: {}", activity.id(), e.getMessage());
+            System.err.println("Erro ao persistir atividade histórica " + activity.id() + ": " + e.getMessage());
         }
     }
 
@@ -154,7 +172,7 @@ public class SyncScheduler {
                           "AVALIAÇÃO DO SONO: " + sleepQuality.toUpperCase() + "\n" + preWorkout + 
                           "\n\nSe for treinar mais tarde, registre no Strava para análise!";
         telegramClient.sendMessage(mensagem);
-        log.info("[TELEGRAM] Recomendação matinal enviada.");
+        System.out.println("   [TELEGRAM] Recomendação matinal enviada.");
     }
 
     /**
@@ -183,21 +201,21 @@ public class SyncScheduler {
             String insight = activity.getGeminiInsight();
             
             if (!isValidInsight(insight)) {
-                log.info("[GEMINI] Tentando recuperar análise pendente para: {}", activity.getName());
+                System.out.println("   [GEMINI] Tentando recuperar análise pendente para: " + activity.getName());
                 insight = insightService.getActivityInsightFromEntity(activity);
                 
                 if (isValidInsight(insight)) {
                     activity.setGeminiInsight(insight);
                     activityRepository.save(activity);
                     telegramClient.sendMessage("FEEDBACK DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight);
-                    log.info("[TELEGRAM] Insight recuperado e enviado com sucesso.");
+                    System.out.println("   [TELEGRAM] Insight pendente enviado com sucesso.");
                 } else {
-                    log.warn("[GEMINI] O modelo ainda está indisponível. A recuperação será tentada no próximo ciclo.");
+                    System.out.println("   [GEMINI] Falha na tentativa de recuperação. Tentaremos novamente em breve.");
                 }
             } else {
                 String lembrete = "RELEMBRANDO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight;
                 telegramClient.sendMessage(lembrete);
-                log.info("[TELEGRAM] Lembrete de treino anterior enviado: {}", activity.getName());
+                System.out.println("   [TELEGRAM] Lembrete enviado: " + activity.getName());
             }
         });
     }
@@ -218,10 +236,10 @@ public class SyncScheduler {
         try {
             TokenResponse novoToken = authService.refreshToken(refreshToken);
             this.accessToken = novoToken.getAccessToken();
-            log.info("Token Strava renovado com sucesso.");
+            System.out.println("Token renovado.");
             return true;
         } catch (Exception e) {
-            log.error("ERRO CRÍTICO na renovação do token: {}", e.getMessage());
+            System.err.println("ERRO CRÍTICO na renovação do token: " + e.getMessage());
             return false;
         }
     }

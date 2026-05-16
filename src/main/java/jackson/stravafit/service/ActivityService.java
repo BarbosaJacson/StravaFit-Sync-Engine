@@ -6,28 +6,27 @@ import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.model.MinuteAnalysisEntity;
 import jackson.stravafit.repository.ActivityRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-
-import java.util.List;
 import java.util.ArrayList;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class ActivityService {
 
     private final StravaClient stravaClient;
     private final ActivityRepository activityRepository;
     private final AthleteConfig athleteConfig;
+
+    public ActivityService(StravaClient stravaClient, ActivityRepository activityRepository, AthleteConfig athleteConfig) {
+        this.stravaClient = stravaClient;
+        this.activityRepository = activityRepository;
+        this.athleteConfig = athleteConfig;
+    }
 
     /**
      * Recupera atividades do Strava e filtra apenas aquelas que possuem monitoramento de batimento cardíaco válido.
@@ -60,29 +59,22 @@ public class ActivityService {
         if (activity.id() == null || activityRepository.existsById(activity.id())) return;
 
         List<MinuteAnalysisEntity> minuteEntities = minutes.stream()
-                .map(m -> MinuteAnalysisEntity.builder()
-                        .minute(m.minute())
-                        .averageHeartRate(m.averageHeartRate())
-                        .maxHeartRate(m.maxHeartRate())
-                        .zone(m.zone())
-                        .averageElevation(m.averageElevation())
-                        .averageCadence(m.averageCadence())
-                        .build())
+                .map(m -> new MinuteAnalysisEntity(null, m.minute(), m.averageHeartRate(), m.maxHeartRate(), m.zone(), m.averageElevation(), m.averageCadence()))
                 .toList();
 
-        ActivityEntity entity = ActivityEntity.builder()
-                .id(activity.id())
-                .name(activity.name())
-                .startDate(activity.startDateLocal())
-                .distanceKm(activity.distanceKm())
-                .averageHeartRate(activity.averageHeartRate())
-                .maxHeartRate(activity.maxHeartRate())
-                .sportType(activity.sportType())
-                .dominantZone(zone)
-                .totalTimeMinutes(activity.elapsedTimeMinutes())
-                .geminiInsight(insight)
-                .minuteDetails(new ArrayList<>(minuteEntities))
-                .build();
+        ActivityEntity entity = new ActivityEntity(
+                activity.id(),
+                activity.name(),
+                activity.startDateLocal(),
+                activity.distanceKm(),
+                activity.averageHeartRate(),
+                activity.maxHeartRate(),
+                activity.sportType(),
+                zone,
+                activity.elapsedTimeMinutes(),
+                insight,
+                new ArrayList<>(minuteEntities)
+        );
 
         activityRepository.save(entity);
     }
@@ -118,18 +110,6 @@ public class ActivityService {
             analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad));
         }
         return analysis;
-    }
-
-    /**
-     * Prepara o payload condensado para a API do Gemini.
-     * Em vez de enviar milhares de pontos, enviamos o resumo estatístico.
-     */
-    public Map<String, Object> prepareGeminiPayload(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis, String lastInsight) {
-        return Map.of(
-            "summary", activity,
-            "minuteAnalysis", analysis,
-            "previousContext", lastInsight != null ? lastInsight : "Nenhum histórico disponível."
-        );
     }
 
     /**
