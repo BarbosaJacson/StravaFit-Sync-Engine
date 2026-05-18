@@ -94,24 +94,24 @@ public class SyncScheduler {
             boolean treinoHojeDetectado = false;
 
             for (StravaActivity activity : response.activities()) {
-                if (activityRepository.existsById(activity.id())) {
+                if (activityRepository.existsById(activity.getId())) {
                     continue; // Pula o que já está no banco para economizar API
                 }
 
                 // Parse da data da atividade
-                String dateStr = activity.startDateLocal();
+                String dateStr = activity.getStartDateLocal();
                 LocalDate activityDate = (dateStr.contains("Z") || dateStr.contains("+")) 
                         ? ZonedDateTime.parse(dateStr).toLocalDate() 
                         : LocalDate.parse(dateStr.substring(0, 10));
 
                 if (activityDate.isEqual(today)) {
-                    System.out.println("-> NOVO TREINO DETECTADO PARA O DIA: " + activity.name());
+                    System.out.println("-> NOVO TREINO DETECTADO PARA O DIA: " + activity.getName());
                     geminiDisponivel = processarEEnviar(tokenParaUsar, activity);
                     treinoHojeDetectado = true;
                 } else {
                     // CARGA HISTÓRICA: Se não é hoje e não está no banco, apenas persiste os dados
                     // Isso vai carregar suas 59 atividades gradualmente sem disparar 59 notificações
-                    System.out.println("-> Carregando atividade histórica para o banco: " + activity.name() + " (" + activityDate + ")");
+                    System.out.println("-> Carregando atividade histórica para o banco: " + activity.getName() + " (" + activityDate + ")");
                     persistirSemNotificar(tokenParaUsar, activity);
                 }
             }
@@ -141,14 +141,14 @@ public class SyncScheduler {
     }
 
     private boolean processarEEnviar(String token, StravaActivity activity) {
-        DataProcessamento dados = buscarDadosCompletosAtividade(token, activity);
+        DataProcessamento dados = buscarDadosCompletosAtividade(token, activity); // activity.getId()
         List<StravaActivity.MinuteAnalysis> minuteAnalysis = dados.minuteAnalysis();
         String zonaDominante = dados.zonaDominante();
         String insight = insightService.getActivityInsight(activity, minuteAnalysis);
         boolean success = isValidInsight(insight);
         
         if (success) {
-            telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.name() + "\n\n" + insight);
+            telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
         } else {
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
@@ -159,10 +159,10 @@ public class SyncScheduler {
 
     private void persistirSemNotificar(String token, StravaActivity activity) {
         try {
-            DataProcessamento dados = buscarDadosCompletosAtividade(token, activity);
+            DataProcessamento dados = buscarDadosCompletosAtividade(token, activity); // activity.getId()
             activityService.saveActivity(activity, dados.minuteAnalysis(), dados.zonaDominante(), null);
         } catch (Exception e) {
-            System.err.println("Erro ao persistir atividade histórica " + activity.id() + ": " + e.getMessage());
+            System.err.println("Erro ao persistir atividade histórica " + activity.getId() + ": " + e.getMessage());
         }
     }
 
@@ -179,8 +179,8 @@ public class SyncScheduler {
      * Método auxiliar para centralizar a busca e agregação de dados da atividade.
      */
     private DataProcessamento buscarDadosCompletosAtividade(String token, StravaActivity activity) {
-        List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(token, activity.id());
-        List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.id());
+        List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(token, activity.getId());
+        List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.getId());
         List<Double> hrData = activityService.getHeartRateStream(streams);
         String zonaDominante = activityService.calculateDominantZoneSummary(hrData);
         List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, zones);
@@ -197,7 +197,7 @@ public class SyncScheduler {
     ) {}
 
     private void garantirEEnviarUltimoInsight() {
-        activityRepository.findLastActivities(PageRequest.of(0, 1)).stream().findFirst().ifPresent(activity -> {
+        activityRepository.findLastActivities(PageRequest.of(0, 1)).stream().findFirst().ifPresent(activity -> { // activity is ActivityEntity
             String insight = activity.getGeminiInsight();
             
             if (!isValidInsight(insight)) {
@@ -205,7 +205,7 @@ public class SyncScheduler {
                 insight = insightService.getActivityInsightFromEntity(activity);
                 
                 if (isValidInsight(insight)) {
-                    activity.setGeminiInsight(insight);
+                    activity.setGeminiInsight(insight); // activity is ActivityEntity
                     activityRepository.save(activity);
                     telegramClient.sendMessage("FEEDBACK DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight);
                     System.out.println("   [TELEGRAM] Insight pendente enviado com sucesso.");
@@ -213,7 +213,7 @@ public class SyncScheduler {
                     System.out.println("   [GEMINI] Falha na tentativa de recuperação. Tentaremos novamente em breve.");
                 }
             } else {
-                String lembrete = "RELEMBRANDO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight;
+                String lembrete = "RELEMBRANDO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight; // activity is ActivityEntity
                 telegramClient.sendMessage(lembrete);
                 System.out.println("   [TELEGRAM] Lembrete enviado: " + activity.getName());
             }

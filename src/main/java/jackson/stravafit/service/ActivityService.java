@@ -6,6 +6,7 @@ import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.model.MinuteAnalysisEntity;
 import jackson.stravafit.repository.ActivityRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,17 +17,12 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@RequiredArgsConstructor
 public class ActivityService {
 
     private final StravaClient stravaClient;
     private final ActivityRepository activityRepository;
     private final AthleteConfig athleteConfig;
-
-    public ActivityService(StravaClient stravaClient, ActivityRepository activityRepository, AthleteConfig athleteConfig) {
-        this.stravaClient = stravaClient;
-        this.activityRepository = activityRepository;
-        this.athleteConfig = athleteConfig;
-    }
 
     /**
      * Recupera atividades do Strava e filtra apenas aquelas que possuem monitoramento de batimento cardíaco válido.
@@ -35,12 +31,12 @@ public class ActivityService {
         List<StravaActivity> allActivities = stravaClient.getActivities(token, page);
 
         List<StravaActivity> filtered = allActivities.stream()
-                .filter(activity -> Boolean.TRUE.equals(activity.hasHeartRate()))
+                .filter(activity -> Boolean.TRUE.equals(activity.getHasHeartRate()))
                 .filter(activity -> {
-                    String type = activity.sportType();
+                    String type = activity.getSportType();
                     return "Run".equalsIgnoreCase(type) || "Walk".equalsIgnoreCase(type);
                 })
-                .filter(activity -> activity.averageHeartRate() != null && activity.averageHeartRate() > 0)
+                .filter(activity -> activity.getAverageHeartRate() != null && activity.getAverageHeartRate() > 0)
                 .toList();
 
         return new ActivityPageResponse(filtered, allActivities.size());
@@ -56,22 +52,22 @@ public class ActivityService {
 
     @Transactional
     public void saveActivity(StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone, String insight) {
-        if (activity.id() == null || activityRepository.existsById(activity.id())) return;
+        if (activity.getId() == null || activityRepository.existsById(activity.getId())) return;
 
         List<MinuteAnalysisEntity> minuteEntities = minutes.stream()
-                .map(m -> new MinuteAnalysisEntity(null, m.minute(), m.averageHeartRate(), m.maxHeartRate(), m.zone(), m.averageElevation(), m.averageCadence()))
+                .map(m -> new MinuteAnalysisEntity(null, m.getMinute(), m.getAverageHeartRate(), m.getMaxHeartRate(), m.getZone(), m.getAverageElevation(), m.getAverageCadence()))
                 .toList();
 
         ActivityEntity entity = new ActivityEntity(
-                activity.id(),
-                activity.name(),
-                activity.startDateLocal(),
-                activity.distanceKm(),
-                activity.averageHeartRate(),
-                activity.maxHeartRate(),
-                activity.sportType(),
+                activity.getId(),
+                activity.getName(),
+                activity.getStartDateLocal(),
+                activity.getDistance() / 1000.0, // Converte metros para Km
+                activity.getAverageHeartRate(),
+                activity.getMaxHeartRate(),
+                activity.getSportType(),
                 zone,
-                activity.elapsedTimeMinutes(),
+                (int) (activity.getElapsedTime() / 60.0), // Converte segundos para minutos
                 insight,
                 new ArrayList<>(minuteEntities)
         );
@@ -107,7 +103,7 @@ public class ActivityService {
             int minuteNumber = (i / 60) + 1;
             int zoneDetected = calculateKarvonenZone(avgHr);
             
-            analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad));
+            analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad)); // Se for record, manter, se classe, usar new
         }
         return analysis;
     }
@@ -140,9 +136,9 @@ public class ActivityService {
 
     private List<Double> extractStream(List<StravaActivity.ActivityStream> streams, String type) {
         return streams.stream()
-                .filter(s -> type.equals(s.type()))
+                .filter(s -> type.equals(s.getType()))
                 .findFirst()
-                .map(StravaActivity.ActivityStream::data)
+                .map(StravaActivity.ActivityStream::getData)
                 .orElse(List.of());
     }
 
