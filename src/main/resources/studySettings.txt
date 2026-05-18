@@ -1,0 +1,26 @@
+BASE DE CONHECIMENTO CIENTÍFICO - MATRIZ DE METABOLISMO STRAVAFIT
+REFERÊNCIAS: San-Millán & Brooks (2017) | Casanova, Wevers & Navarro-Ledesma (2023)
+
+CENÁRIO 1: EFICIÊNCIA MITOCONDRIAL CONSOLIDADA (PONTO DOCE FATMAX)
+Gatilho do Strava: Tempo de treino >= 45 min E Frequência Cardíaca Média em Zona 2 (124-138 bpm) E Desvio Padrão da FC < 5 bpm.
+Diagnóstico Clínico-Esportivo da IA: Execução perfeita alinhada a San-Millán & Brooks (2017). Sua intensidade de esforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM). Esse estresse volumétrico controlado ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial nas fibras musculares Tipo I. Sua flexibilidade metabólica crônica foi aprimorada.
+
+CENÁRIO 2: DERIVA CARDÍACA E FADIGA AERÓBICA (MITOCHONDRIAL DECOUPLING)
+Gatilho do Strava: Tempo de treino >= 40 min E Aumento de FC > 5% na segunda metade do treino mantendo o mesmo ritmo (Pace) em terreno plano.
+Diagnóstico Clínico-Esportivo da IA: Detectado Desacoplamento Aeróbico significativo. Segundo Brooks (2017), a elevação da frequência cardíaca sem aumento de carga externa indica que suas mitocôndrias falharam em sustentar a demanda de oxigênio, exigindo maior recrutamento cardiovascular para compensar a perda de eficiência mecânica. Isso sugere necessidade de maior volume em Zona 2 para fortalecer a base mitocondrial.
+
+CENÁRIO 3: ESTRESSE GLICOLÍTICO POR ALTIMETRIA (FATOR LADEIRA)
+Gatilho do Strava: BPM subindo acima do teto da Z2 (>138 bpm) E Ritmo (Pace) diminuindo E Ganho de Altimetria significativo detectado na janela de tempo.
+Diagnóstico Clínico-Esportivo da IA: Transição metabólica identificada. A inclinação severa forçou o recrutamento de fibras Tipo II, elevando a produção de piruvato além da capacidade de oxidação mitocondrial imediata. Houve um "shift" do metabolismo lipídico para o glicolítico. Embora tenha saído da Z2, o estresse é justificado pela carga mecânica da subida, conforme Casanova (2023).
+
+CENÁRIO 4: ALTA INTENSIDADE E MITOHORMESE (ESTÍMULO HIIT)
+Gatilho do Strava: Oscilação rítmica de FC entre Zona 1 e Zona 4/5 E Cadência elevada E Curtos períodos de esforço máximo.
+Diagnóstico Clínico-Esportivo da IA: Estímulo de Mitohormese detectado. Este treino promoveu um estresse oxidativo agudo que sinaliza a renovação da rede mitocondrial (Mitofagia). A alternância de intensidade é eficaz para melhorar o VO2 Max e a capacidade de remoção de lactato, complementando o trabalho de base de San-Millán.
+
+CENÁRIO 5: FLEXIBILIDADE METABÓLICA INCIPIENTE (INCONSISTÊNCIA TÉCNICA)
+Gatilho do Strava: BPM oscilando frequentemente entre Z2 e Z3 em terreno plano E Desvio Padrão da FC > 8 bpm.
+Diagnóstico Clínico-Esportivo da IA: Instabilidade Aeróbica detectada. De acordo com San-Millán (2017), a incapacidade de manter a FC estável em ritmo constante sugere uma flexibilidade metabólica ainda em desenvolvimento. Você está alternando entre queimar gordura e glicogênio de forma ineficiente. Foque em "segurar o passo" para manter a homeostase na Zona 2.
+
+CENÁRIO 6: SOBRECARGA E RISCO DE OVERTRAINING
+Gatilho do Strava: FC de repouso elevada E Dificuldade em elevar a FC durante o esforço (FC "travada") E Perda de ritmo constante.
+Diagnóstico Clínico-Esportivo da IA: Alerta de fadiga do Sistema Nervoso Autônomo. A resposta cardíaca rompeu a correlação esperada com o esforço. Segundo os estudos de metabolismo celular, o excesso de volume sem recuperação adequada inibe a função mitocondrial. Recomenda-se descanso total ou treino regenerativo em Zona 1.
