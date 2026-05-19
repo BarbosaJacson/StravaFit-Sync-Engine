@@ -48,29 +48,20 @@ public class SyncScheduler {
     @EventListener(ApplicationReadyEvent.class)
     public void syncOnStartup() {
         System.out.println("   [STARTUP] Iniciando motor e verificando pendências...");
-        String sleepQuality = simulateSleepQuality();
-        executarSincronizacao(this.accessToken, sleepQuality);
+        executarSincronizacao(this.accessToken);
     }
 
     // AGENDAMENTO ÚNICO: Ter, Qui, Sab às 07:00 (Relatório Consolidado)
     @Scheduled(cron = "0 0 7 * * TUE,THU,SAT")
     public void scheduledSync() {
         System.out.println("=== [RELATÓRIO MATINAL 07:00] ===");
-        String sleepQuality = simulateSleepQuality();
-        executarSincronizacao(this.accessToken, sleepQuality);
+        executarSincronizacao(this.accessToken);
     }
 
     // NOVO AGENDAMENTO: Ter, Qui, Sab às 05:05 (Checagem de Sono e Plano Pré-Treino)
     @Scheduled(cron = "0 5 5 * * TUE,THU,SAT")
     public void scheduledSleepCheck() {
-        System.out.println("=== [AGENDAMENTO AUTOMÁTICO DISPARADO - PRÉ-TREINO] ===");
-        System.out.println("   [SONO] Avaliando qualidade do sono para o treino de hoje...");
-        
-        String sleepQuality = simulateSleepQuality(); // Simula a qualidade do sono
-        String preWorkoutRecommendation = insightService.getPreWorkoutRecommendation(sleepQuality);
-        
-        telegramClient.sendMessage("AVALIAÇÃO PRÉ-TREINO (" + LocalDate.now() + "):\n\n" + preWorkoutRecommendation);
-        System.out.println("   [TELEGRAM] Recomendação pré-treino enviada com base no sono.");
+        System.out.println("=== [AGENDAMENTO 05:05] Checagem pré-treino disparada. ===");
     }
 
     // TAREFA DE RECUPERAÇÃO: Tenta "curar" atividades sem insight a cada 1 hora
@@ -80,7 +71,7 @@ public class SyncScheduler {
         garantirEEnviarUltimoInsight();
     }
 
-    private boolean executarSincronizacao(String tokenParaUsar, String sleepQuality) {
+    private boolean executarSincronizacao(String tokenParaUsar) {
         boolean geminiDisponivel = true;
         try {
             ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(tokenParaUsar, 1);
@@ -119,7 +110,7 @@ public class SyncScheduler {
             // Se terminamos de olhar a lista e ninguém foi "hoje"
             if (!treinoHojeDetectado) {
                 System.out.println("-> Nenhum treino detectado para hoje (" + today + "). Enviando recomendação matinal.");
-                enviarRecomendacaoPreTreino(today, sleepQuality);
+                enviarRecomendacaoPreTreino(today);
             }
 
             if (geminiDisponivel) {
@@ -129,7 +120,7 @@ public class SyncScheduler {
 
         } catch (HttpClientErrorException.Unauthorized e) {
             if (renovarToken()) {
-                return executarSincronizacao(this.accessToken, sleepQuality);
+                return executarSincronizacao(this.accessToken);
             } else {
                 System.err.println("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
                 return false;
@@ -166,13 +157,9 @@ public class SyncScheduler {
         }
     }
 
-    private void enviarRecomendacaoPreTreino(LocalDate today, String sleepQuality) {
-        String preWorkout = insightService.getPreWorkoutRecommendation(sleepQuality);
-        String mensagem = "BOM DIA! 🌅\nNão detectei treino hoje (" + today + ").\n\n" +
-                          "AVALIAÇÃO DO SONO: " + sleepQuality.toUpperCase() + "\n" + preWorkout + 
-                          "\n\nSe for treinar mais tarde, registre no Strava para análise!";
-        telegramClient.sendMessage(mensagem);
-        System.out.println("   [TELEGRAM] Recomendação matinal enviada.");
+    private void enviarRecomendacaoPreTreino(LocalDate today) {
+        telegramClient.sendMessage("BOM DIA! 🌅\nNão detectei treino hoje (" + today + ").\n\nSe for treinar mais tarde, registre no Strava para análise!");
+        System.out.println("   [TELEGRAM] Mensagem matinal enviada.");
     }
 
     /**
@@ -198,24 +185,18 @@ public class SyncScheduler {
 
     private void garantirEEnviarUltimoInsight() {
         activityRepository.findLastActivities(PageRequest.of(0, 1)).stream().findFirst().ifPresent(activity -> { // activity is ActivityEntity
-            String insight = activity.getGeminiInsight();
+            System.out.println("   [GEMINI] Forçando nova análise técnica para o último treino: " + activity.getName());
             
-            if (!isValidInsight(insight)) {
-                System.out.println("   [GEMINI] Tentando recuperar análise pendente para: " + activity.getName());
-                insight = insightService.getActivityInsightFromEntity(activity);
-                
-                if (isValidInsight(insight)) {
-                    activity.setGeminiInsight(insight); // activity is ActivityEntity
-                    activityRepository.save(activity);
-                    telegramClient.sendMessage("FEEDBACK DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight);
-                    System.out.println("   [TELEGRAM] Insight pendente enviado com sucesso.");
-                } else {
-                    System.out.println("   [GEMINI] Falha na tentativa de recuperação. Tentaremos novamente em breve.");
-                }
+            // Ignoramos o insight antigo e pedimos um novo para garantir a leitura dos studySettings atuais
+            String novoInsight = insightService.getActivityInsightFromEntity(activity);
+            
+            if (isValidInsight(novoInsight)) {
+                activity.setGeminiInsight(novoInsight);
+                activityRepository.save(activity);
+                telegramClient.sendMessage("ANÁLISE ATUALIZADA DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + novoInsight);
+                System.out.println("   [TELEGRAM] Nova análise enviada com sucesso.");
             } else {
-                String lembrete = "RELEMBRANDO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight; // activity is ActivityEntity
-                telegramClient.sendMessage(lembrete);
-                System.out.println("   [TELEGRAM] Lembrete enviado: " + activity.getName());
+                System.out.println("   [GEMINI] Falha ao gerar nova análise. Mantendo registro anterior.");
             }
         });
     }
@@ -242,15 +223,5 @@ public class SyncScheduler {
             System.err.println("ERRO CRÍTICO na renovação do token: " + e.getMessage());
             return false;
         }
-    }
-
-    // Simula a qualidade do sono (para fins de demonstração)
-    private String simulateSleepQuality() {
-        Random random = new Random();
-        int chance = random.nextInt(100);
-        if (chance < 20) return "muito ruim"; // 20% de chance de sono muito ruim
-        if (chance < 50) return "ruim";      // 30% de chance de sono ruim (total 50%)
-        if (chance < 80) return "razoável";  // 30% de chance de sono razoável (total 80%)
-        return "excelente";                  // 20% de chance de sono excelente
     }
 }

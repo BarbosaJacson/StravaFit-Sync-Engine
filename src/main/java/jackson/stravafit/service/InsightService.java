@@ -29,27 +29,13 @@ public class InsightService {
     private static final String NO_MARKDOWN_INSTRUCTION = 
         "--- REGRAS DE SAÍDA: Use apenas texto puro com quebras de linha e emojis. PROIBIDO o uso de blocos de código (```). ---";
     
-    // Gerador de recomendação pré-treino baseado no sono
-    public String getPreWorkoutRecommendation(String sleepQuality) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(NO_MARKDOWN_INSTRUCTION).append("\n\n");
-        sb.append("AVALIACAO PRE-TREINO: CONDICOES FISIOLOGICAS\n\n");
-        sb.append("SITUAÇÃO DO SONO: ").append(sleepQuality.toUpperCase()).append("\n\n");
-        sb.append("TAREFA:\n");
-        sb.append("Como um Especialista em Fisiologia, avalie esta qualidade de sono para um atleta que tem um treino de Zona 2 programado para hoje as 05:30 da manhã.\n");
-        sb.append("Se o sono foi ruim ou muito ruim, sugira uma adaptação (redução de volume ou intensidade, ou até mesmo descanso total). Se o sono foi bom, reforce o plano.\n");
-        sb.append("Forneça uma recomendação curta, direta e técnica.");
-        
-        return sanitizeOutput(geminiClient.getInsight(sb.toString()));
-    }
-
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
         // Ajustado para usar getters, tratando o acesso privado relatado
         return generateInsight(
                 activity.getName(), 
                 activity.getDistance() / 1000.0, 
                 activity.getStartDateLocal(), 
-                activity.getAverageSpeed(), 
+                activity.getAverageSpeed() * 3.6, // Converte m/s para km/h
                 analysis);
     }
 
@@ -81,6 +67,7 @@ public class InsightService {
 
     private String buildProfessionalPrompt(String name, Double distance, ZonedDateTime date, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, String proximoTreinoData) {
         String scientificContext = knowledgeService.getScientificContext(); // Recupera o material científico
+        log.info("[KNOWLEDGE] Contexto científico enviado para IA: {} caracteres.", scientificContext != null ? scientificContext.length() : 0);
         if (scientificContext == null || scientificContext.isBlank()) {
             log.error("ALERTA: Base de conhecimento (studySettings) está VAZIA no banco de dados!");
             scientificContext = "Use as diretrizes gerais de San-Millán para eficiência mitocondrial.";
@@ -92,6 +79,7 @@ public class InsightService {
         
         // --- CÁLCULO DE MÉTRICAS PARA O MOTOR DE CLASSIFICAÇÃO ---
         double fcMedia = analysis.stream().mapToDouble(m -> m.getAverageHeartRate()).average().orElse(0.0);
+        double fcMax = analysis.stream().mapToDouble(m -> m.getMaxHeartRate()).max().orElse(0.0);
         int duracao = analysis.size();
         
         // Cálculo de Desvio Padrão (Estabilidade)
@@ -112,31 +100,47 @@ public class InsightService {
 
         StringBuilder sb = new StringBuilder();
         
-        sb.append("SISTEMA: Atue como o motor de classificação StravaFit. Sua tarefa é mapear os DADOS DO TREINO contra o CONTEXTO CIENTIFICO.\n\n");
-        sb.append("REGRA DE OURO: Proibido inventar. Retorne estritamente o Diagnóstico Clínico-Esportivo contido no arquivo.\n\n");
+        sb.append("SISTEMA: Motor de Classificação Fisiológica StravaFit.\n");
+        sb.append("REGRA: Retorne EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' do cenário identificado no arquivo abaixo.\n\n");
 
-        sb.append("<CONTEXTO_CIENTIFICO>\n");
+        sb.append("--- BASE DE CONHECIMENTO (studySettings) ---\n");
         sb.append(scientificContext).append("\n\n");
-        sb.append("</CONTEXTO_CIENTIFICO>\n\n");
 
-        sb.append("<DADOS_DO_TREINO>\n");
-        sb.append(String.format("- Volume: %d minutos | Distancia: %.1f KM\n", duracao, safeDistance));
+        sb.append("--- DADOS DO TREINO ATUAL ---\n");
+        sb.append(String.format("- Tempo Total de Treino: %d minutos\n", duracao));
         sb.append(String.format("- Frequência Cardíaca Média: %.0f bpm\n", fcMedia));
-        sb.append(String.format("- Análise das Zonas: %.1f%% do tempo na Zona 2\n", z2Percent));
+        sb.append(String.format("- Frequência Cardíaca Máxima: %.0f bpm\n", fcMax));
+        sb.append(String.format("- Percentual em Zona 2: %.1f%%\n", z2Percent));
+        sb.append(String.format("- Comportamento da Frequência Cardíaca: %s\n", comportamento));
         sb.append(String.format("- Desvio Padrão da FC: %.1f bpm\n", stdDev));
         sb.append(String.format("- Altimetria: %.0f m | Pace Médio: %s\n", ganhoAlt, paceFormatted));
-        sb.append(String.format("- Dinamica de FC: %s\n", comportamento));
-        sb.append("</DADOS_DO_TREINO>\n\n");
+        sb.append(String.format("- Ritmo de Corrida (Pace Médio): %s\n", paceFormatted));
+        sb.append("------------------------------\n\n");
 
-        sb.append("TAREFA: Localize no <CONTEXTO_CIENTIFICO> qual CENÁRIO possui o 'Gatilho' que melhor descreve os <DADOS_DO_TREINO>. Retorne a resposta neste formato:\n\n");
-        sb.append("🏃‍♂️ *StravaFit AI - Análise de Eficiência Mitocondrial*\n\n");
-        sb.append("📌 *Cenário Detectado:* [Número] - [Título Exato]\n");
-        sb.append("📊 *Métricas:* {tempo} min | FC Média: {fc} bpm | Pace: {pace}\n\n");
-        sb.append("🩺 *Diagnóstico Fisiológico:*\n[Diagnóstico exato do arquivo]\n\n");
+        sb.append("TAREFA: Analise os DADOS DO TREINO ATUAL correlacionando os indicadores de Frequência Cardíaca Média, ")
+                .append("Altimetria e Ritmo de Corrida. Compare os resultados, identifique o CENÁRIO correto da BASE e ")
+                .append("monte o retorno estritamente no formato estruturado abaixo (SEM ASTERISCOS nos títulos):\n\n")
 
-        // Manter a série temporal para que a IA possa validar o comportamento minuto a minuto
+                .append("DIAGNÓSTICO CLÍNICO-ESPORTIVO:\n")
+                .append("[Transcreva exatamente o texto do diagnóstico do cenário identificado na BASE]\n\n")
+                .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO:\n")
+                .append("[Comente brevemente como o Ritmo de Corrida (Pace) e a Altimetria influenciaram os Batimentos (BPM). ")
+                .append("Identifique e cite explicitamente qual foi a zona cardíaca predominante praticada no treino, ")
+                .append("justificando se o ritmo estava estável ou se o coração subiu de rotação de forma desproporcional].")
+
+                .append("CONCLUSÃO DA IA (TRADUÇÃO CIENTÍFICA):\n")
+                .append("[Gere uma conclusão dinâmica, curta e com linguagem muito fácil e direta, adaptada ao cenário identificado. ")
+                .append("Use metáforas simples baseadas no arquivo (como 'fábricas de energia', 'combustível limpo vs sujo' ou 'sobrecarga'). ")
+                .append("Explique de forma prática o impacto do treino na saúde celular do usuário e dê um conselho claro de ação ")
+                .append("apoiado nos conceitos de San-Millán ou Casanova et al.](SEM ASTERISCOS nos títulos):\n\n");
+        sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
+        sb.append("📌 Cenário Detectado: [Título]\n");
+        sb.append("📊 Métricas: ").append(duracao).append(" min | FC Média: ").append((int)fcMedia).append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | Pace: ").append(paceFormatted).append("\n\n");
+        sb.append("🩺 Diagnóstico Fisiológico:\n[Diagnóstico do Estudo]\n\n");
+        sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData).append("\n\n");
+
         sb.append(NO_MARKDOWN_INSTRUCTION).append("\n\n");
-        sb.append("DADOS BRUTOS PARA VALIDAÇÃO DA SÉRIE TEMPORAL (Minuto: BPM/Alt/Cad):\n");
+        sb.append("SERIE TEMPORAL (Min: BPM/Alt/Cad):\n");
         for (int i = 0; i < analysis.size(); i += 2) {
             StravaActivity.MinuteAnalysis m = analysis.get(i);
             sb.append(String.format("%d:%.0f/%.0fm/%.0f | ", 
@@ -146,7 +150,7 @@ public class InsightService {
                     m.getAverageCadence()));
         }
         
-        sb.append("\n\nPRÓXIMA PROGRAMAÇÃO: ").append(proximoTreinoData);
+        sb.append("\n\nPRÓXIMO TREINO: ").append(proximoTreinoData);
         
         return sb.toString();
     }
