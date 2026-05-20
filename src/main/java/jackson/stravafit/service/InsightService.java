@@ -6,6 +6,7 @@ import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.service.KnowledgeService; // Importar KnowledgeService
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.*;
@@ -19,6 +20,15 @@ public class InsightService {
 
     private final GeminiClient geminiClient;
     private final KnowledgeService knowledgeService; // Injetar KnowledgeService
+
+    @Value("${atleta.hr-max:173}")
+    private int hrMaxConfig;
+
+    @Value("${atleta.hr-resting:53}")
+    private int hrResting;
+
+    @Value("${atleta.idade:47}")
+    private int idadeAtleta;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     private static final DateTimeFormatter BRAZIL_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
@@ -94,6 +104,9 @@ public class InsightService {
         double firstHalf = analysis.stream().limit(duracao / 2).mapToDouble(m -> m.getAverageHeartRate()).average().orElse(fcMedia);
         double secondHalf = analysis.stream().skip(duracao / 2).mapToDouble(m -> m.getAverageHeartRate()).average().orElse(fcMedia);
         String comportamento = (secondHalf > firstHalf * 1.05) ? "subindo gradualmente (drift)" : "predominantemente estável";
+
+        // Cálculo de VO2 Max Estimado (Fórmula de Uth-Sørensen)
+        double vo2MaxEstimado = 15.3 * ((double) hrMaxConfig / hrResting);
         
         double ganhoAlt = analysis.stream().mapToDouble(m -> m.getAverageElevation()).max().orElse(0.0) - 
                           analysis.stream().mapToDouble(m -> m.getAverageElevation()).min().orElse(0.0);
@@ -101,7 +114,8 @@ public class InsightService {
         StringBuilder sb = new StringBuilder();
         
         sb.append("SISTEMA: Motor de Classificação Fisiológica StravaFit.\n");
-        sb.append("REGRA: Retorne EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' do cenário identificado no arquivo abaixo.\n\n");
+        sb.append(String.format("PERFIL DO ATLETA: %d anos | FC Máx: %d | FC Repouso: %d\n", idadeAtleta, hrMaxConfig, hrResting));
+        sb.append("REGRA: Retorne EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' do cenário identificado no arquivo abaixo, adaptando o tom para a idade do atleta.\n\n");
 
         sb.append("--- BASE DE CONHECIMENTO (studySettings) ---\n");
         sb.append(scientificContext).append("\n\n");
@@ -111,6 +125,7 @@ public class InsightService {
         sb.append(String.format("- Frequência Cardíaca Média: %.0f bpm\n", fcMedia));
         sb.append(String.format("- Frequência Cardíaca Máxima: %.0f bpm\n", fcMax));
         sb.append(String.format("- Percentual em Zona 2: %.1f%%\n", z2Percent));
+        sb.append(String.format("- VO2 Max Estimado (Perfil): %.1f ml/kg/min\n", vo2MaxEstimado));
         sb.append(String.format("- Comportamento da Frequência Cardíaca: %s\n", comportamento));
         sb.append(String.format("- Desvio Padrão da FC: %.1f bpm\n", stdDev));
         sb.append(String.format("- Altimetria: %.0f m | Pace Médio: %s\n", ganhoAlt, paceFormatted));
@@ -119,10 +134,14 @@ public class InsightService {
 
         sb.append("TAREFA: Analise os DADOS DO TREINO ATUAL correlacionando os indicadores de Frequência Cardíaca Média, ")
                 .append("Altimetria e Ritmo de Corrida. Compare os resultados, identifique o CENÁRIO correto da BASE e ")
+                .append("Classifique o treino com base nos modelos de San-Millán (2017), Casanova (2023) ")
+                .append("e no modelo de distribuição de intensidade de Stephen Seiler (2010) focado em VO2 máx. ")
                 .append("monte o retorno estritamente no formato estruturado abaixo (SEM ASTERISCOS nos títulos):\n\n")
 
                 .append("DIAGNÓSTICO CLÍNICO-ESPORTIVO:\n")
                 .append("[Transcreva exatamente o texto do diagnóstico do cenário identificado na BASE]\n\n")
+                .append("RESUMO DIDÁTICO:\n")
+                .append("[Gere uma única linha curta, direta e muito didática resumindo o impacto prático do cenário, em linguagem de corredor].\n\n")
                 .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO:\n")
                 .append("[Comente brevemente como o Ritmo de Corrida (Pace) e a Altimetria influenciaram os Batimentos (BPM). ")
                 .append("Identifique e cite explicitamente qual foi a zona cardíaca predominante praticada no treino, ")
@@ -130,15 +149,25 @@ public class InsightService {
 
                 .append("CONCLUSÃO DA IA (TRADUÇÃO CIENTÍFICA):\n")
                 .append("[Gere uma conclusão dinâmica, curta e com linguagem muito fácil e direta, adaptada ao cenário identificado. ")
+                .append("Explique a importância desse treino para o VO2 máx do usuário: se ele serviu para construir a base celular ")
+                .append("ou se serviu para desafiar o teto do indicador. Use as metáforas de 'fábricas de energia', 'combustível limpo' ")
+                .append("ou 'limpeza de lixo celular' de acordo com o artigo correspondente].")
                 .append("Use metáforas simples baseadas no arquivo (como 'fábricas de energia', 'combustível limpo vs sujo' ou 'sobrecarga'). ")
                 .append("Explique de forma prática o impacto do treino na saúde celular do usuário e dê um conselho claro de ação ")
                 .append("apoiado nos conceitos de San-Millán ou Casanova et al.](SEM ASTERISCOS nos títulos):\n\n");
         sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
         sb.append("📌 Cenário Detectado: [Título]\n");
-        sb.append("📊 Métricas: ").append(duracao).append(" min | FC Média: ").append((int)fcMedia).append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | Pace: ").append(paceFormatted).append("\n\n");
+        sb.append("📊 Métricas: ").append(duracao).append(" min | FC Média: ").append((int)fcMedia)
+                .append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | VO2 Max: ")
+                .append(String.format("%.1f", vo2MaxEstimado)).append(" | Pace: ").append(paceFormatted).append("\n\n");
         sb.append("🩺 Diagnóstico Fisiológico:\n[Diagnóstico do Estudo]\n\n");
-        sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData).append("\n\n");
-
+        sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData).append("\n\n")
+                .append("PRESCRIÇÃO DO PRÓXIMO TREINO (STRAFIT PREDICT):\n")
+                .append("[Consulte as DIRETRIZES DE RECOMENDAÇÃO PREDITIVA e a MATRIZ DE CONFIGURAÇÃO DE SESSÃO. ")
+                .append("Com base no resultado de hoje, diga qual o próximo treino. Se for TIROS, monte uma PLANILHA DETALHADA ")
+                .append("especificando: Tempo de Aquecimento, Número exato de Tiros, Duração de cada tiro em minutos, ")
+                .append("Faixa de BPM alvo para o tiro, Tempo e tipo de Recuperação entre eles, e o Desaquecimento. ")
+                .append("Use um formato de lista limpo e adicione uma frase motivacional de treinador de corrida no final].\n\n");
         sb.append(NO_MARKDOWN_INSTRUCTION).append("\n\n");
         sb.append("SERIE TEMPORAL (Min: BPM/Alt/Cad):\n");
         for (int i = 0; i < analysis.size(); i += 2) {
