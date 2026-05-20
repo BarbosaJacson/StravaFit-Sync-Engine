@@ -8,7 +8,6 @@ import jackson.stravafit.repository.ActivityRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
@@ -16,7 +15,6 @@ import org.springframework.web.client.HttpClientErrorException;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.List;
-import java.util.Random;
 
 @Service
 public class SyncScheduler {
@@ -184,7 +182,7 @@ public class SyncScheduler {
     ) {}
 
     private void garantirEEnviarUltimoInsight() {
-        activityRepository.findLastActivities(PageRequest.of(0, 1)).stream().findFirst().ifPresent(activity -> { // activity is ActivityEntity
+        activityRepository.findTop10ByOrderByStartDateDesc().stream().findFirst().ifPresent(activity -> { // activity is ActivityEntity
             System.out.println("   [GEMINI] Forçando nova análise técnica para o último treino: " + activity.getName());
             
             // Ignoramos o insight antigo e pedimos um novo para garantir a leitura dos studySettings atuais

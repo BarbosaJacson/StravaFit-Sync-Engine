@@ -3,6 +3,7 @@ package jackson.stravafit.service;
 import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
+import jackson.stravafit.repository.ActivityRepository;
 import jackson.stravafit.service.KnowledgeService; // Importar KnowledgeService
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,7 @@ import java.util.List;
 public class InsightService {
 
     private final GeminiClient geminiClient;
+    private final ActivityRepository activityRepository;
     private final KnowledgeService knowledgeService; // Injetar KnowledgeService
 
     @Value("${atleta.hr-max:173}")
@@ -83,6 +85,33 @@ public class InsightService {
             scientificContext = "Use as diretrizes gerais de San-Millán para eficiência mitocondrial.";
         }
 
+        // --- BUSCA HISTÓRICO PARA CONTEXTO DE MÉDIAS (ÚLTIMOS 10 TREINOS) ---
+        List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
+        
+        double vo2Medio = 0;
+        double fcMaxMedia = 0;
+        double fcMedioDasMedias = 0;
+        double paceMedioSegundos = 0;
+
+        if (!historico.isEmpty()) {
+            fcMaxMedia = historico.stream()
+                    .mapToDouble(a -> a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMaxConfig)
+                    .average().orElse(0);
+            
+            fcMedioDasMedias = historico.stream()
+                    .mapToDouble(a -> a.getAverageHeartRate() != null ? a.getAverageHeartRate() : 0)
+                    .average().orElse(0);
+
+            vo2Medio = historico.stream()
+                    .mapToDouble(a -> 15.3 * ((a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMaxConfig) / (double) hrResting))
+                    .average().orElse(0);
+
+            paceMedioSegundos = historico.stream()
+                    .filter(a -> a.getDistanceKm() != null && a.getDistanceKm() > 0 && a.getTotalTimeMinutes() != null)
+                    .mapToDouble(a -> (a.getTotalTimeMinutes() * 60.0) / a.getDistanceKm())
+                    .average().orElse(0);
+        }
+
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         double safeDistance = (distance != null) ? distance : 0.0;
         String paceFormatted = (averageSpeed != null && averageSpeed > 0) ? formatSpeedToPace(averageSpeed) : "N/A";
@@ -119,6 +148,12 @@ public class InsightService {
 
         sb.append("--- BASE DE CONHECIMENTO (studySettings) ---\n");
         sb.append(scientificContext).append("\n\n");
+
+        sb.append("CONTEXTO DO USUÁRIO (MÉDIAS DOS ÚLTIMOS 10 TREINOS NO MYSQL):\n")
+          .append("- VO2 Máx Médio Atual: ").append(String.format("%.1f", vo2Medio)).append(" ml/kg/min\n")
+          .append("- FC Máxima Média Registrada: ").append((int)fcMaxMedia).append(" bpm\n")
+          .append("- FC Média Geral das Sessões: ").append((int)fcMedioDasMedias).append(" bpm\n")
+          .append("- Ritmo (Pace) Médio de Corrida: ").append(formatSecondsToPace(paceMedioSegundos)).append(" min/km\n\n");
 
         sb.append("--- DADOS DO TREINO ATUAL ---\n");
         sb.append(String.format("- Tempo Total de Treino: %d minutos\n", duracao));
@@ -161,13 +196,20 @@ public class InsightService {
                 .append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | VO2 Max: ")
                 .append(String.format("%.1f", vo2MaxEstimado)).append(" | Pace: ").append(paceFormatted).append("\n\n");
         sb.append("🩺 Diagnóstico Fisiológico:\n[Diagnóstico do Estudo]\n\n");
-        sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData).append("\n\n")
-                .append("PRESCRIÇÃO DO PRÓXIMO TREINO (STRAFIT PREDICT):\n")
-                .append("[Consulte as DIRETRIZES DE RECOMENDAÇÃO PREDITIVA e a MATRIZ DE CONFIGURAÇÃO DE SESSÃO. ")
-                .append("Com base no resultado de hoje, diga qual o próximo treino. Se for TIROS, monte uma PLANILHA DETALHADA ")
-                .append("especificando: Tempo de Aquecimento, Número exato de Tiros, Duração de cada tiro em minutos, ")
-                .append("Faixa de BPM alvo para o tiro, Tempo e tipo de Recuperação entre eles, e o Desaquecimento. ")
-                .append("Use um formato de lista limpo e adicione uma frase motivacional de treinador de corrida no final].\n\n");
+        sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData).append("\n\n");
+        sb.append("CONTEXTO DO USUÁRIO (MÉDIAS DOS ÚLTIMOS 10 TREINOS):\n")
+                .append("- VO2 Máx Médio Atual: ").append(String.format("%.1f", vo2Medio)).append(" ml/kg/min\n")
+                .append("- FC Máxima Média Registrada: ").append((int) fcMaxMedia).append(" bpm\n")
+                .append("- FC Média Geral das Sessões: ").append((int) fcMedioDasMedias).append(" bpm\n")
+                .append("- Ritmo (Pace) Médio de Corrida: ").append(formatSecondsToPace(paceMedioSegundos)).append(" min/km\n\n")
+
+                .append("DIRETRIZ DE SELEÇÃO DE TIROS:\n")
+                .append("Compare os dados acima com a MATRIZ DE PROGRESSÃO DE INTENSIDADE. ")
+                .append("Se o treino atual foi Zona 2 e o usuário precisa de tiros, selecione o NÍVEL adequado de progressão ")
+                .append("(iniciando pelo Nível 1 se o histórico não mostrar treinos intensos recentes) e monte a prescrição ")
+                .append("calculando os ritmos alvo baseados no Pace Médio dele (ex: os tiros devem ser mais rápidos que o Pace Médio de 10 treinos).\n");
+        
+
         sb.append(NO_MARKDOWN_INSTRUCTION).append("\n\n");
         sb.append("SERIE TEMPORAL (Min: BPM/Alt/Cad):\n");
         for (int i = 0; i < analysis.size(); i += 2) {
@@ -189,6 +231,13 @@ public class InsightService {
         // Remove asteriscos e hashtags comuns de Markdown
         return text.replaceAll("[*#]", "")
                    .trim();
+    }
+
+    private String formatSecondsToPace(double totalSeconds) {
+        if (totalSeconds <= 0) return "N/A";
+        long minutes = (long) (totalSeconds / 60);
+        long seconds = (long) (totalSeconds % 60);
+        return String.format("%d:%02d", minutes, seconds);
     }
 
     private String formatSpeedToPace(Double speedKmH) {

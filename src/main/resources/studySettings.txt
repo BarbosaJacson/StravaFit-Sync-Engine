@@ -80,22 +80,43 @@ Base Fisiológica: Modelo Polarizado 80/20 (Stephen Seiler, 2010). A IA deve ava
    - Justificativa ao usuário: Explicar que o motor cardiovascular deu sinais de alerta (deriva) ou sub-estímulo, sendo necessário estabilizar a base antes de avançar na intensidade.
 --------------------------------------------------------------------------------
 
-MATRIZ DE CONFIGURAÇÃO DE SESSÃO (MÉTRICAS EXATAS PARA A IA PRESCREVER):
-Quando o motor preditivo indicar um "Treino de Alta Intensidade (Tiros)", a IA deve obrigatoriamente estruturar a planilha do usuário utilizando os parâmetros técnicos abaixo (baseados nos protocolos de HIIT estáveis de Seiler 2010):
+--------------------------------------------------------------------------------
 
-1. Protocolo Padrão de Tiros para o Usuário (Foco em Expansão de VO2 máx):
-   - Aquecimento: 10 a 15 minutos em Zona 1/2 (corrida bem leve para preparar o sistema cardiovascular).
-   - Volume de Tiros: Prescrever entre 4 a 6 tiros de alta intensidade.
-   - Duração do Tiro: Cada tiro deve ter de 3 a 4 minutos de duração estável (tempo ideal para manter o coração no teto do VO2 máx).
-   - Intensidade do Tiro: Manter a Frequência Cardíaca acima de 155 bpm (Zona 4/5 do motor), buscando tocar a rotação máxima com controle.
-   - Recuperação (Pausa): 2 a 3 minutos de caminhada ou trote bem leve entre os tiros (tempo para o lactato baixar parcialmente e o ATP ressintetizar).
-   - Desaquecimento: 5 minutos de trote leve/caminhada no final.
+MATRIZ DE PROGRESSÃO DE INTENSIDADE (HIIT / TIROS - BASE SEILER & CASANOVA):
+Esta matriz serve como régua de evolução para treinos da Zona 3 de Seiler (>155 bpm). O motor Java fornecerá à IA as médias dos últimos 10 treinos (Pace Médio, BPM Médio, FC Máx Média e VO2 Máx Estimado) como linha de base. A IA deverá enquadrar o usuário no Nível correto, priorizando o início pelo Nível 1 (Adaptação) se não houver histórico recente de tiros no banco de dados.
 
-2. Protocolo de Rodagem de Zona 2 (Quando a indicação for Volume/Base):
-   - Meta do Dia: Corrida contínua e confortável.
-   - Duração: 45 a 60 minutos estáveis.
-   - Alvo Cardíaco: Manter estritamente entre 124 e 138 bpm (Zona 2). Se o coração subir, instruir o usuário a reduzir o Pace imediatamente.
+NÍVEL 1: ADAPTAÇÃO NEUROMUSCULAR E CAPILARIZAÇÃO
+- Objetivo: Preparar a estrutura de tendões e a ritmicidade cardíaca sem gerar acidose extrema.
+- Aquecimento: 15 minutos em Zona 1/2.
+- Estrutura: 6 a 8 tiros de 1 minuto de duração.
+- Intensidade: Buscar o limite superior da Zona Cinzenta / início da Zona 3/4 (~148 a 152 bpm). Ritmo forte, mas controlado.
+- Recuperação: 1 minuto e 30 segundos de caminhada total (recuperação completa do sistema ATP-CP).
+- Desaquecimento: 5 minutos de caminhada.
 
+NÍVEL 2: TRANSIÇÃO E TOLERÂNCIA AO LACTATO
+- Objetivo: Forçar o início da mitofagia (limpeza celular) e testar o clareamento inicial de lactato.
+- Aquecimento: 12 minutos em Zona 1/2.
+- Estrutura: 5 a 6 tiros de 2 minutos de duração.
+- Intensidade: Entrar firmemente na Zona 3/4 (manter entre 150 a 155 bpm).
+- Recuperação: 2 minutos de trote bem lento ou caminhada ativa.
+- Desaquecimento: 5 minutos de caminhada.
+
+NÍVEL 3: EXPANSÃO DO TETO DO VO2 MÁX (PROTOCOLO CLÁSSICO DE SEILER)
+- Objetivo: Desafiar agressivamente o transporte de oxigênio e sinalização máxima de biogênese.
+- Aquecimento: 10 a 12 minutos em Zona 1/2.
+- Estrutura: 4 a 5 tiros de 3 a 4 minutos de duração (estabilização no teto).
+- Intensidade: Zona 5 do motor (Frequência Cardíaca estritamente acima de 155 bpm, buscando tocar a máxima).
+- Recuperação: 3 minutos de caminhada ativa ou trote regenerativo.
+- Desaquecimento: 5 minutos de caminhada.
+
+NÍVEL 4: CAPACIDADE GLICOLÍTICA EXTREMA (SARGENTO HORMÉTICO)
+- Objetivo: Estresse hormético seletivo máximo para atletas já adaptados ao teto do VO2 máx.
+- Aquecimento: 10 minutos em Zona 1/2.
+- Estrutura: 3 a 4 blocos de [400 metros ou 1min30s em Velocidade Máxima de Tiro] intercalados com pausas curtíssimas.
+- Intensidade: Rotação máxima do motor (BPM > 162 bpm).
+- Recuperação: 1 minuto de caminhada (recuperação incompleta para forçar o músculo a trabalhar sob forte acidose).
+- Desaquecimento: 8 minutos de caminhada livre.
+--------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 MATRIZ DE DECISÃO: CENÁRIOS DE COMPARAÇÃO PARA PROCESSAMENTO DA IA
 --------------------------------------------------------------------------------
