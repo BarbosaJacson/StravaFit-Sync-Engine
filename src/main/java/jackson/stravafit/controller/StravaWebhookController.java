@@ -50,9 +50,10 @@ public class StravaWebhookController {
         // Verifica se o evento é de uma nova atividade
         String objectType = (String) payload.get("object_type");
         String aspectType = (String) payload.get("aspect_type"); // create, update, delete
+        Object objectId = payload.get("object_id");
 
         if ("activity".equals(objectType) && "create".equals(aspectType)) {
-            log.info("[WEBHOOK] Nova atividade detectada! Disparando sincronização...");
+            log.info("[WEBHOOK] Nova atividade detectada (ID: {})! Disparando sincronização...", objectId);
             syncScheduler.scheduledSync();
         }
 

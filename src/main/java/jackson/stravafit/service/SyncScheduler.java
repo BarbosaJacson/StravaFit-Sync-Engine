@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -51,8 +52,9 @@ public class SyncScheduler {
 
     // AGENDAMENTO ÚNICO: Ter, Qui, Sab às 07:00 (Relatório Consolidado)
     @Scheduled(cron = "0 0 7 * * TUE,THU,SAT")
+    @Async
     public void scheduledSync() {
-        System.out.println("=== [SINCONIZAÇÃO DISPARADA] ===");
+        System.out.println("=== [SINCRONIZAÇÃO DISPARADA] ===");
         executarSincronizacao(this.accessToken);
     }
 
@@ -87,21 +89,24 @@ public class SyncScheduler {
                     continue; // Pula o que já está no banco para economizar API
                 }
 
-                // Parse da data da atividade
-                String dateStr = activity.getStartDateLocal();
-                LocalDate activityDate = (dateStr.contains("Z") || dateStr.contains("+")) 
-                        ? ZonedDateTime.parse(dateStr).toLocalDate() 
-                        : LocalDate.parse(dateStr.substring(0, 10));
+                try {
+                    // Parse da data da atividade
+                    String dateStr = activity.getStartDateLocal();
+                    LocalDate activityDate = (dateStr.contains("Z") || dateStr.contains("+")) 
+                            ? ZonedDateTime.parse(dateStr).toLocalDate() 
+                            : LocalDate.parse(dateStr.substring(0, 10));
 
-                if (activityDate.isEqual(today)) {
-                    System.out.println("-> NOVO TREINO DETECTADO PARA O DIA: " + activity.getName());
-                    geminiDisponivel = processarEEnviar(tokenParaUsar, activity);
-                    treinoHojeDetectado = true;
-                } else {
-                    // CARGA HISTÓRICA: Se não é hoje e não está no banco, apenas persiste os dados
-                    // Isso vai carregar suas 59 atividades gradualmente sem disparar 59 notificações
-                    System.out.println("-> Carregando atividade histórica para o banco: " + activity.getName() + " (" + activityDate + ")");
-                    persistirSemNotificar(tokenParaUsar, activity);
+                    if (activityDate.isEqual(today)) {
+                        System.out.println("-> NOVO TREINO DETECTADO PARA O DIA: " + activity.getName());
+                        geminiDisponivel = processarEEnviar(tokenParaUsar, activity);
+                        treinoHojeDetectado = true;
+                    } else {
+                        // CARGA HISTÓRICA: Apenas persiste sem disparar notificações
+                        System.out.println("-> Carregando atividade histórica para o banco: " + activity.getName() + " (" + activityDate + ")");
+                        persistirSemNotificar(tokenParaUsar, activity);
+                    }
+                } catch (Exception e) {
+                    System.err.println("   [ERRO] Falha ao processar atividade individual " + activity.getId() + ": " + e.getMessage());
                 }
             }
 
@@ -111,7 +116,10 @@ public class SyncScheduler {
                 enviarRecomendacaoPreTreino(today);
             }
 
-            if (geminiDisponivel) {
+            // REGRA DE OURO: Só forçamos a reanálise se NÃO detectamos um treino novo agora.
+            // Se 'treinoHojeDetectado' for true, o insight já foi enviado no 'processarEEnviar'.
+            if (geminiDisponivel && !treinoHojeDetectado) {
+                System.out.println("   [RECOVERY] Nenhum treino novo hoje. Verificando pendências ou atualizando última análise...");
                 garantirEEnviarUltimoInsight();
             }
             return true;
