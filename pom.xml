@@ -68,8 +68,6 @@
 			<optional>true</optional>
 		</dependency>
 
-		<!-- Removendo jakarta.annotation-api, Lombok já resolve o que precisamos -->
-		<!-- Removendo dependência do OpenAI -->
 	</dependencies>
 
 	<build>

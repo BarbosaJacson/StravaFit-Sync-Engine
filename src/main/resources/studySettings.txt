@@ -56,9 +56,9 @@ TABELA DE PREMISSAS METABÓLICAS (LIMITES DE CORTE DO MOTOR):
 - Zona 5 (Capacidade Máxima / VO2): Acima de 90% da FCR -> Acima de 160 bpm
 --------------------------------------------------------------------------------
 
-DIRETRIZES DE RECOMENDAÇÃO PREDITIVA (MOTOR DE PRESCRIÇÃO DO PRÓXIMO TREINO):
+DIRETRIZES DE RECOMENDAÇÃO PREDITIVA (PRESCRIÇÃO DO PRÓXIMO TREINO):
 Base Fisiológica: Modelo Polarizado 80/20 (Stephen Seiler, 2010). A IA deve avaliar o impacto do TREINO ATUAL e, obrigatoriamente, sugerir a abordagem ideal para a PRÓXIMA sessão com base nas regras de alternância abaixo:
-
+Premissa: Treinos de intensidade só deverão ser programados para dias de quinta feira.
 1. Se o Treino Atual foi Classificado como CENÁRIO 1 (FATmax / Zona 2):
    - Ação da IA: Identificar que a base aeróbica e o suporte volumétrico foram consolidados.
    - Recomendação de Próximo Treino: Sugerir um estímulo de Alta Intensidade / Tiros (Zona 3 de Seiler / Cenário 5). 

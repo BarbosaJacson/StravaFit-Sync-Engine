@@ -171,43 +171,49 @@ public class InsightService {
                 .append("Altimetria e Ritmo de Corrida. Compare os resultados, identifique o CENÁRIO correto da BASE e ")
                 .append("Classifique o treino com base nos modelos de San-Millán (2017), Casanova (2023) ")
                 .append("e no modelo de distribuição de intensidade de Stephen Seiler (2010) focado em VO2 máx. ")
-                .append("monte o retorno estritamente no formato estruturado abaixo (SEM ASTERISCOS nos títulos):\n\n")
+                .append("monte o retorno estritamente no formato estruturado abaixo (SEM ASTERISCOS nos títulos):\n\n");
 
-                .append("DIAGNÓSTICO CLÍNICO-ESPORTIVO:\n")
+        sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
+        sb.append("📌 Cenário Detectado: [Título]\n");
+        sb.append("📊 Métricas: ").append(duracao).append(" min | FC Média: ").append((int)fcMedia)
+                .append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | VO2 Max: ")
+                .append(String.format("%.1f", vo2MaxEstimado)).append(" | Pace: ").append(paceFormatted).append("\n\n");
+        sb.append("DIAGNÓSTICO CLÍNICO-ESPORTIVO:\n")
                 .append("[Transcreva exatamente o texto do diagnóstico do cenário identificado na BASE]\n\n")
-                .append("RESUMO DIDÁTICO:\n")
-                .append("[Gere uma única linha curta, direta e muito didática resumindo o impacto prático do cenário, em linguagem de corredor].\n\n")
                 .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO:\n")
                 .append("[Comente brevemente como o Ritmo de Corrida (Pace) e a Altimetria influenciaram os Batimentos (BPM). ")
                 .append("Identifique e cite explicitamente qual foi a zona cardíaca predominante praticada no treino, ")
                 .append("justificando se o ritmo estava estável ou se o coração subiu de rotação de forma desproporcional].")
+                .append("🩺 DIAGNÓSTICO FISIOLÓGICO:\n[Diagnóstico do Estudo]\n\n")
 
-                .append("CONCLUSÃO DA IA (TRADUÇÃO CIENTÍFICA):\n")
+                .append("CONCLUSÃO (TRADUÇÃO CIENTÍFICA):\n")
                 .append("[Gere uma conclusão dinâmica, curta e com linguagem muito fácil e direta, adaptada ao cenário identificado. ")
                 .append("Explique a importância desse treino para o VO2 máx do usuário: se ele serviu para construir a base celular ")
                 .append("ou se serviu para desafiar o teto do indicador. Use as metáforas de 'fábricas de energia', 'combustível limpo' ")
                 .append("ou 'limpeza de lixo celular' de acordo com o artigo correspondente].")
                 .append("Use metáforas simples baseadas no arquivo (como 'fábricas de energia', 'combustível limpo vs sujo' ou 'sobrecarga'). ")
                 .append("Explique de forma prática o impacto do treino na saúde celular do usuário e dê um conselho claro de ação ")
-                .append("apoiado nos conceitos de San-Millán ou Casanova et al.](SEM ASTERISCOS nos títulos):\n\n");
-        sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
-        sb.append("📌 Cenário Detectado: [Título]\n");
-        sb.append("📊 Métricas: ").append(duracao).append(" min | FC Média: ").append((int)fcMedia)
-                .append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | VO2 Max: ")
-                .append(String.format("%.1f", vo2MaxEstimado)).append(" | Pace: ").append(paceFormatted).append("\n\n");
-        sb.append("🩺 Diagnóstico Fisiológico:\n[Diagnóstico do Estudo]\n\n");
-        sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData).append("\n\n");
-        sb.append("CONTEXTO DO USUÁRIO (MÉDIAS DOS ÚLTIMOS 10 TREINOS):\n")
+                .append("apoiado nos conceitos de San-Millán ou Casanova et al.](SEM ASTERISCOS nos títulos):\n\n")
+                .append("RESUMO:\n")
+                .append("[Gere uma única linha curta, direta e muito didática resumindo o impacto prático do cenário, em linguagem de corredor].\n\n");
+        
+        sb.append("--- ESTRUTURAÇÃO DO PRÓXIMO TREINO ---\n");
+        sb.append("DATA PROGRAMADA: ").append(proximoTreinoData).append("\n\n");
+        
+        sb.append("DADOS HISTÓRICOS (ÚLTIMOS 10 TREINOS):\n")
                 .append("- VO2 Máx Médio Atual: ").append(String.format("%.1f", vo2Medio)).append(" ml/kg/min\n")
                 .append("- FC Máxima Média Registrada: ").append((int) fcMaxMedia).append(" bpm\n")
                 .append("- FC Média Geral das Sessões: ").append((int) fcMedioDasMedias).append(" bpm\n")
                 .append("- Ritmo (Pace) Médio de Corrida: ").append(formatSecondsToPace(paceMedioSegundos)).append(" min/km\n\n")
 
-                .append("DIRETRIZ DE SELEÇÃO DE TIROS:\n")
-                .append("Compare os dados acima com a MATRIZ DE PROGRESSÃO DE INTENSIDADE. ")
-                .append("Se o treino atual foi Zona 2 e o usuário precisa de tiros, selecione o NÍVEL adequado de progressão ")
-                .append("(iniciando pelo Nível 1 se o histórico não mostrar treinos intensos recentes) e monte a prescrição ")
-                .append("calculando os ritmos alvo baseados no Pace Médio dele (ex: os tiros devem ser mais rápidos que o Pace Médio de 10 treinos).\n");
+                .append("DIRETRIZES OBRIGATÓRIAS DE PRESCRIÇÃO (STRAFIT PREDICT):\n")
+                .append("1. ANALISE O DIA DA SEMANA: Identifique o dia em 'DATA PROGRAMADA' e siga esta regra:\n")
+                .append("   - Se for SÁBADO: Prescreva um TREINO LONGO em Zona 2 (Volume alto, intensidade baixa).\n")
+                .append("   - Se for TERÇA-FEIRA: Prescreva um TREINO CURTO em Zona 2 (Manutenção aeróbica).\n")
+                .append("   - Se for QUINTA-FEIRA: Prescreva um TREINO DE INTENSIDADE (TIROS).\n\n")
+                .append("2. SELEÇÃO DE NÍVEL (Apenas para Quintas): Consulte a MATRIZ DE PROGRESSÃO DE INTENSIDADE no studySettings. ")
+                .append("Selecione o NÍVEL adequado (use Nível 1 se não houver intensidade recente no histórico) e calcule os ritmos alvo ")
+                .append("garantindo que os tiros sejam significativamente mais rápidos que o 'Ritmo Médio de Corrida' do usuário.\n");
         
 
         sb.append(NO_MARKDOWN_INSTRUCTION).append("\n\n");

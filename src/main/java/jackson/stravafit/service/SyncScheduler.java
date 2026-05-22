@@ -52,7 +52,7 @@ public class SyncScheduler {
     // AGENDAMENTO ÚNICO: Ter, Qui, Sab às 07:00 (Relatório Consolidado)
     @Scheduled(cron = "0 0 7 * * TUE,THU,SAT")
     public void scheduledSync() {
-        System.out.println("=== [RELATÓRIO MATINAL 07:00] ===");
+        System.out.println("=== [SINCONIZAÇÃO DISPARADA] ===");
         executarSincronizacao(this.accessToken);
     }
 
@@ -69,7 +69,7 @@ public class SyncScheduler {
         garantirEEnviarUltimoInsight();
     }
 
-    private boolean executarSincronizacao(String tokenParaUsar) {
+    public boolean executarSincronizacao(String tokenParaUsar) {
         boolean geminiDisponivel = true;
         try {
             ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(tokenParaUsar, 1);
