@@ -12,11 +12,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Service
 public class SyncScheduler {
 
@@ -25,8 +29,12 @@ public class SyncScheduler {
     private final InsightService insightService;
     private final TelegramClient telegramClient;
     private final ActivityRepository activityRepository;
-    private String accessToken;
+    
+    private volatile String accessToken; // Garante visibilidade entre múltiplas threads
     private final String refreshToken;
+
+    // Cache em memória para evitar que duas threads processem a mesma atividade simultaneamente
+    private final Set<Long> atividadesEmProcessamento = ConcurrentHashMap.newKeySet();
 
     public SyncScheduler(ActivityService activityService, 
                          StravaAuthService authService, 
@@ -46,7 +54,7 @@ public class SyncScheduler {
 
     @EventListener(ApplicationReadyEvent.class)
     public void syncOnStartup() {
-        System.out.println("   [STARTUP] Iniciando motor e verificando pendências...");
+        log.info("[STARTUP] Iniciando motor e verificando pendências...");
         executarSincronizacao(this.accessToken);
     }
 
@@ -54,20 +62,20 @@ public class SyncScheduler {
     @Scheduled(cron = "0 0 7 * * TUE,THU,SAT")
     @Async
     public void scheduledSync() {
-        System.out.println("=== [SINCRONIZAÇÃO DISPARADA] ===");
+        log.info("=== [SINCRONIZAÇÃO AGENDADA DISPARADA] ===");
         executarSincronizacao(this.accessToken);
     }
 
     // NOVO AGENDAMENTO: Ter, Qui, Sab às 05:05 (Checagem de Sono e Plano Pré-Treino)
     @Scheduled(cron = "0 5 5 * * TUE,THU,SAT")
     public void scheduledSleepCheck() {
-        System.out.println("=== [AGENDAMENTO 05:05] Checagem pré-treino disparada. ===");
+        log.info("=== [AGENDAMENTO 05:05] Checagem pré-treino disparada. ===");
     }
 
     // TAREFA DE RECUPERAÇÃO: Tenta "curar" atividades sem insight a cada 1 hora
     @Scheduled(cron = "0 0 * * * *")
     public void recoveryTask() {
-        System.out.println("   [RECOVERY] Verificando se há treinos pendentes de análise...");
+        log.info("[RECOVERY] Verificando se há treinos pendentes de análise...");
         garantirEEnviarUltimoInsight();
     }
 
@@ -76,7 +84,7 @@ public class SyncScheduler {
         try {
             ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(tokenParaUsar, 1);
             if (response.activities().isEmpty()) {
-                System.out.println("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
+                log.info("[STRAVA] Nenhuma atividade compatível encontrada recentemente.");
                 garantirEEnviarUltimoInsight(); // Tenta recuperar pendências mesmo sem treino novo
                 return false;
             }
@@ -89,6 +97,12 @@ public class SyncScheduler {
                     continue; // Pula o que já está no banco para economizar API
                 }
 
+                // Impede que Webhook e Schedule processem a mesma atividade ao mesmo tempo
+                if (!atividadesEmProcessamento.add(activity.getId())) {
+                    log.warn("[SYNC] Atividade {} já está sendo processada por outra thread.", activity.getId());
+                    continue;
+                }
+
                 try {
                     // Parse da data da atividade
                     String dateStr = activity.getStartDateLocal();
@@ -97,29 +111,31 @@ public class SyncScheduler {
                             : LocalDate.parse(dateStr.substring(0, 10));
 
                     if (activityDate.isEqual(today)) {
-                        System.out.println("-> NOVO TREINO DETECTADO PARA O DIA: " + activity.getName());
+                        log.info("-> NOVO TREINO DETECTADO PARA O DIA: {}", activity.getName());
                         geminiDisponivel = processarEEnviar(tokenParaUsar, activity);
                         treinoHojeDetectado = true;
                     } else {
                         // CARGA HISTÓRICA: Apenas persiste sem disparar notificações
-                        System.out.println("-> Carregando atividade histórica para o banco: " + activity.getName() + " (" + activityDate + ")");
+                        log.info("-> Carregando atividade histórica para o banco: {} ({})", activity.getName(), activityDate);
                         persistirSemNotificar(tokenParaUsar, activity);
                     }
                 } catch (Exception e) {
-                    System.err.println("   [ERRO] Falha ao processar atividade individual " + activity.getId() + ": " + e.getMessage());
+                    log.error("[ERRO] Falha ao processar atividade individual {}: {}", activity.getId(), e.getMessage());
+                } finally {
+                    atividadesEmProcessamento.remove(activity.getId());
                 }
             }
 
             // Se terminamos de olhar a lista e ninguém foi "hoje"
             if (!treinoHojeDetectado) {
-                System.out.println("-> Nenhum treino detectado para hoje (" + today + "). Enviando recomendação matinal.");
+                log.info("-> Nenhum treino detectado para hoje ({}). Enviando recomendação matinal.", today);
                 enviarRecomendacaoPreTreino(today);
             }
 
             // REGRA DE OURO: Só forçamos a reanálise se NÃO detectamos um treino novo agora.
             // Se 'treinoHojeDetectado' for true, o insight já foi enviado no 'processarEEnviar'.
             if (geminiDisponivel && !treinoHojeDetectado) {
-                System.out.println("   [RECOVERY] Nenhum treino novo hoje. Verificando pendências ou atualizando última análise...");
+                log.info("[RECOVERY] Nenhum treino novo hoje. Verificando pendências ou atualizando última análise...");
                 garantirEEnviarUltimoInsight();
             }
             return true;
@@ -128,11 +144,11 @@ public class SyncScheduler {
             if (renovarToken()) {
                 return executarSincronizacao(this.accessToken);
             } else {
-                System.err.println("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
+                log.error("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
                 return false;
             }
         } catch (Exception e) {
-            System.err.println("ERRO NA SINCRONIZAÇÃO: " + e.getMessage());
+            log.error("ERRO NA SINCRONIZAÇÃO: {}", e.getMessage());
             return false;
         }
     }
@@ -149,7 +165,7 @@ public class SyncScheduler {
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
         } else {
             activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
-            System.err.println("   [GEMINI] Falha temporária. Atividade salva para análise posterior.");
+            log.warn("[GEMINI] Falha temporária. Atividade salva para análise posterior.");
         }
         return success;
     }
@@ -159,13 +175,13 @@ public class SyncScheduler {
             DataProcessamento dados = buscarDadosCompletosAtividade(token, activity); // activity.getId()
             activityService.saveActivity(activity, dados.minuteAnalysis(), dados.zonaDominante(), null);
         } catch (Exception e) {
-            System.err.println("Erro ao persistir atividade histórica " + activity.getId() + ": " + e.getMessage());
+            log.error("Erro ao persistir atividade histórica {}: {}", activity.getId(), e.getMessage());
         }
     }
 
     private void enviarRecomendacaoPreTreino(LocalDate today) {
         telegramClient.sendMessage("BOM DIA! 🌅\nNão detectei treino hoje (" + today + ").\n\nSe for treinar mais tarde, registre no Strava para análise!");
-        System.out.println("   [TELEGRAM] Mensagem matinal enviada.");
+        log.info("[TELEGRAM] Mensagem matinal enviada.");
     }
 
     /**
@@ -191,7 +207,7 @@ public class SyncScheduler {
 
     private void garantirEEnviarUltimoInsight() {
         activityRepository.findTop10ByOrderByStartDateDesc().stream().findFirst().ifPresent(activity -> { // activity is ActivityEntity
-            System.out.println("   [GEMINI] Forçando nova análise técnica para o último treino: " + activity.getName());
+            log.info("[GEMINI] Forçando nova análise técnica para o último treino: {}", activity.getName());
             
             // Ignoramos o insight antigo e pedimos um novo para garantir a leitura dos studySettings atuais
             String novoInsight = insightService.getActivityInsightFromEntity(activity);
@@ -200,9 +216,9 @@ public class SyncScheduler {
                 activity.setGeminiInsight(novoInsight);
                 activityRepository.save(activity);
                 telegramClient.sendMessage("ANÁLISE ATUALIZADA DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + novoInsight);
-                System.out.println("   [TELEGRAM] Nova análise enviada com sucesso.");
+                log.info("[TELEGRAM] Nova análise enviada com sucesso.");
             } else {
-                System.out.println("   [GEMINI] Falha ao gerar nova análise. Mantendo registro anterior.");
+                log.warn("[GEMINI] Falha ao gerar nova análise. Mantendo registro anterior.");
             }
         });
     }
@@ -219,14 +235,14 @@ public class SyncScheduler {
         return !isJsonError && !startsWithError && !containsTechnicalError;
     }
 
-    private boolean renovarToken() {
+    private synchronized boolean renovarToken() { // Sincronizado para evitar múltiplas renovações ao mesmo tempo
         try {
             TokenResponse novoToken = authService.refreshToken(refreshToken);
             this.accessToken = novoToken.getAccessToken();
-            System.out.println("Token renovado.");
+            log.info("Token Strava renovado com sucesso.");
             return true;
         } catch (Exception e) {
-            System.err.println("ERRO CRÍTICO na renovação do token: " + e.getMessage());
+            log.error("ERRO CRÍTICO na renovação do token: {}", e.getMessage());
             return false;
         }
     }
