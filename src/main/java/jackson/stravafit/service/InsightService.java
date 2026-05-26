@@ -178,28 +178,19 @@ public class InsightService {
         sb.append("📊 Métricas: ").append(duracao).append(" min | FC Média: ").append((int)fcMedia)
                 .append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | VO2 Max: ")
                 .append(String.format("%.1f", vo2MaxEstimado)).append(" | Pace: ").append(paceFormatted).append("\n\n");
-        sb.append("DIAGNÓSTICO CLÍNICO-ESPORTIVO:\n")
-                .append("[Transcreva exatamente o texto do diagnóstico do cenário identificado na BASE]\n\n")
-                .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO:\n")
-                .append("[Comente brevemente como o Ritmo de Corrida (Pace) e a Altimetria influenciaram os Batimentos (BPM). ")
-                .append("Identifique e cite explicitamente qual foi a zona cardíaca predominante praticada no treino, ")
-                .append("justificando se o ritmo estava estável ou se o coração subiu de rotação de forma desproporcional].")
-                .append("🩺 DIAGNÓSTICO FISIOLÓGICO:\n[Diagnóstico do Estudo]\n\n")
 
-                .append("CONCLUSÃO (TRADUÇÃO CIENTÍFICA):\n")
-                .append("[Gere uma conclusão dinâmica, curta e com linguagem muito fácil e direta, adaptada ao cenário identificado. ")
-                .append("Explique a importância desse treino para o VO2 máx do usuário: se ele serviu para construir a base celular ")
-                .append("ou se serviu para desafiar o teto do indicador. Use as metáforas de 'fábricas de energia', 'combustível limpo' ")
-                .append("ou 'limpeza de lixo celular' de acordo com o artigo correspondente].")
-                .append("Use metáforas simples baseadas no arquivo (como 'fábricas de energia', 'combustível limpo vs sujo' ou 'sobrecarga'). ")
-                .append("Explique de forma prática o impacto do treino na saúde celular do usuário e dê um conselho claro de ação ")
-                .append("apoiado nos conceitos de San-Millán ou Casanova et al.](SEM ASTERISCOS nos títulos):\n\n")
-                .append("RESUMO:\n")
-                .append("[Gere uma única linha curta, direta e muito didática resumindo o impacto prático do cenário, em linguagem de corredor].\n\n");
-        
-        sb.append("--- ESTRUTURAÇÃO DO PRÓXIMO TREINO ---\n");
+        sb.append("🩺 DIAGNÓSTICO FISIOLÓGICO:\n")
+                .append("[Transcreva aqui EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' da BASE de conhecimento para o cenário identificado]\n\n")
+
+                .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO:\n")
+                .append("[Análise técnica curta de Pace vs BPM vs Altimetria e identificação da Zona Cardíaca predominante]\n\n");
+
+        sb.append("🏃‍♂️ CONCLUSÃO E PRÓXIMO PASSO:\n")
+                .append("[Explique o impacto na saúde mitocondrial usando metáforas do estudo e dê um conselho prático final].\n\n");
+
+        sb.append("--- PRESCRIÇÃO STRAFIT PREDICT ---\n");
         sb.append("DATA PROGRAMADA: ").append(proximoTreinoData).append("\n\n");
-        
+
         sb.append("DADOS HISTÓRICOS (ÚLTIMOS 10 TREINOS):\n")
                 .append("- VO2 Máx Médio Atual: ").append(String.format("%.1f", vo2Medio)).append(" ml/kg/min\n")
                 .append("- FC Máxima Média Registrada: ").append((int) fcMaxMedia).append(" bpm\n")
