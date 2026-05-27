@@ -12,7 +12,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
+import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -73,8 +75,13 @@ public class InsightService {
     private String generateInsight(String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
         String proximoTreinoData = calcularProximaDataTreino(activityDate);
+        
+        log.info("[AI] Iniciando construção do prompt para atividade: {}", name);
         String prompt = buildProfessionalPrompt(name, distance, activityDate, averageSpeed, analysis, proximoTreinoData);
-        return sanitizeOutput(geminiClient.getInsight(prompt));
+        
+        String result = geminiClient.getInsight(prompt);
+        log.info("[AI] Resposta da IA recebida com sucesso.");
+        return sanitizeOutput(result);
     }
 
     private String buildProfessionalPrompt(String name, Double distance, ZonedDateTime date, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, String proximoTreinoData) {
@@ -125,6 +132,16 @@ public class InsightService {
         double variance = analysis.stream().mapToDouble(m -> Math.pow(m.getAverageHeartRate() - fcMedia, 2)).average().orElse(0.0);
         double stdDev = Math.sqrt(variance);
 
+        // Cálculo de Zona Predominante (Moda das zonas registradas)
+        int zonaPredominante = analysis.stream()
+                .map(StravaActivity.MinuteAnalysis::getZone)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
+                .entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(0);
+
         // Distribuição de Zonas
         long z2Count = analysis.stream().filter(m -> m.getZone() == 2).count();
         double z2Percent = (duracao > 0) ? (z2Count * 100.0) / duracao : 0.0;
@@ -169,14 +186,14 @@ public class InsightService {
 
         sb.append("TAREFA: Analise os DADOS DO TREINO ATUAL correlacionando os indicadores de Frequência Cardíaca Média, ")
                 .append("Altimetria e Ritmo de Corrida. Compare os resultados, identifique o CENÁRIO correto da BASE e ")
-                .append("Classifique o treino com base nos modelos de San-Millán (2017), Casanova (2023) ")
+                .append("Classifique o treino com base nos modelos de San-Millán (2017), Casanova (2023), HENRÍQUEZ-OLGUÍN ET AL. (2019) ")
                 .append("e no modelo de distribuição de intensidade de Stephen Seiler (2010) focado em VO2 máx. ")
                 .append("monte o retorno estritamente no formato estruturado abaixo (SEM ASTERISCOS nos títulos):\n\n");
 
-        sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
+        sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n").append(dataFormatada).append("\n");
         sb.append("📌 Cenário Detectado: [Título]\n");
-        sb.append("📊 Métricas: ").append(duracao).append(" min | FC Média: ").append((int)fcMedia)
-                .append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | VO2 Max: ")
+        sb.append("📊 Métricas: ").append(String.format("%.1f km | ", safeDistance)).append(duracao).append(" min | FC Média: ").append((int)fcMedia)
+                .append(" bpm | FC Máx: ").append((int)fcMax).append(" bpm | Zona Predom: Z").append(zonaPredominante).append(" | VO2 Max: ")
                 .append(String.format("%.1f", vo2MaxEstimado)).append(" | Pace: ").append(paceFormatted).append("\n\n");
 
         sb.append("🩺 DIAGNÓSTICO FISIOLÓGICO:\n")
@@ -188,15 +205,19 @@ public class InsightService {
         sb.append("🏃‍♂️ CONCLUSÃO E PRÓXIMO PASSO:\n")
                 .append("[Explique o impacto na saúde mitocondrial usando metáforas do estudo e dê um conselho prático final].\n\n");
 
-        sb.append("--- PRESCRIÇÃO STRAFIT PREDICT ---\n");
-        sb.append("DATA PROGRAMADA: ").append(proximoTreinoData).append("\n\n");
+        sb.append("--- REPOSIÇÃO E DESCANSO PÓS-TREINO ---\n")
+                .append("CONSULTE o CONTEXTO CIENTÍFICO (studySettings) na seção 'DIRETRIZES PARA ALIMENTAÇÃO DE REPOSIÇÃO E DESCANSO'. ")
+                .append("Com base nessas diretrizes, forneça recomendações específicas para o atleta, considerando a intensidade e duração do treino atual.\n")
+                .append("[Recomendações de reposição nutricional e descanso pós-treino extraídas do CONTEXTO CIENTÍFICO]\n\n");
 
         sb.append("DADOS HISTÓRICOS (ÚLTIMOS 10 TREINOS):\n")
                 .append("- VO2 Máx Médio Atual: ").append(String.format("%.1f", vo2Medio)).append(" ml/kg/min\n")
                 .append("- FC Máxima Média Registrada: ").append((int) fcMaxMedia).append(" bpm\n")
                 .append("- FC Média Geral das Sessões: ").append((int) fcMedioDasMedias).append(" bpm\n")
-                .append("- Ritmo (Pace) Médio de Corrida: ").append(formatSecondsToPace(paceMedioSegundos)).append(" min/km\n\n")
+                .append("- Ritmo (Pace) Médio de Corrida: ").append(formatSecondsToPace(paceMedioSegundos)).append(" min/km\n\n");
 
+        sb.append("--- PRESCRIÇÃO STRAFIT PREDICT ---\n");
+        sb.append("DATA PROGRAMADA: ").append(proximoTreinoData).append("\n\n")
                 .append("DIRETRIZES OBRIGATÓRIAS DE PRESCRIÇÃO (STRAFIT PREDICT):\n")
                 .append("1. ANALISE O DIA DA SEMANA: Identifique o dia em 'DATA PROGRAMADA' e siga esta regra:\n")
                 .append("   - Se for SÁBADO: Prescreva um TREINO LONGO em Zona 2 (Volume alto, intensidade baixa).\n")
@@ -205,7 +226,6 @@ public class InsightService {
                 .append("2. SELEÇÃO DE NÍVEL (Apenas para Quintas): Consulte a MATRIZ DE PROGRESSÃO DE INTENSIDADE no studySettings. ")
                 .append("Selecione o NÍVEL adequado (use Nível 1 se não houver intensidade recente no histórico) e calcule os ritmos alvo ")
                 .append("garantindo que os tiros sejam significativamente mais rápidos que o 'Ritmo Médio de Corrida' do usuário.\n");
-        
 
         sb.append(NO_MARKDOWN_INSTRUCTION).append("\n\n");
         sb.append("SERIE TEMPORAL (Min: BPM/Alt/Cad):\n");
@@ -246,10 +266,19 @@ public class InsightService {
     }
 
     private String calcularProximaDataTreino(ZonedDateTime date) {
-        // O método retorna String, garantindo compatibilidade com o que é esperado no prompt
-        LocalDate hoje = date.toLocalDate();
-        LocalDate proximo = hoje.plusDays(1);
-        while (proximo.getDayOfWeek() != DayOfWeek.TUESDAY && proximo.getDayOfWeek() != DayOfWeek.THURSDAY && proximo.getDayOfWeek() != DayOfWeek.SATURDAY) {
+        LocalDate activityDate = date.toLocalDate();
+        LocalDate today = LocalDate.now(ZONE_SP);
+
+        // Ponto de partida: se o treino analisado é antigo, começamos a busca a partir de hoje.
+        // Caso contrário, começamos a partir da data do treino.
+        LocalDate baseDate = activityDate.isBefore(today) ? today : activityDate;
+
+        // O próximo treino sempre será, no mínimo, amanhã em relação à data base
+        LocalDate proximo = baseDate.plusDays(1);
+
+        while (proximo.getDayOfWeek() != DayOfWeek.TUESDAY && 
+               proximo.getDayOfWeek() != DayOfWeek.THURSDAY && 
+               proximo.getDayOfWeek() != DayOfWeek.SATURDAY) {
             proximo = proximo.plusDays(1);
         }
         return proximo.atStartOfDay(ZONE_SP).format(NEXT_WORKOUT_FORMATTER);
@@ -261,17 +290,18 @@ public class InsightService {
         }
 
         try {
-            // Tenta parsear como ISO_INSTANT (com Z no final)
-            return ZonedDateTime.parse(dateStr, DateTimeFormatter.ISO_INSTANT.withZone(ZONE_SP));
+            // Priorizamos o horário "nominal" (wall clock time) para evitar o shift de fuso (UTC -> SP).
+            // Pegamos apenas os primeiros 19 caracteres (YYYY-MM-DDTHH:mm:ss) e fixamos no fuso de SP.
+            String localPart = dateStr.length() >= 19 ? dateStr.substring(0, 19) : dateStr;
+            return LocalDateTime.parse(localPart, DateTimeFormatter.ISO_LOCAL_DATE_TIME).atZone(ZONE_SP);
         } catch (Exception e) {
-            // Se falhar, tenta parsear como ISO_DATE_TIME (sem Z, com fuso horário)
             try {
-                String localPart = dateStr.length() >= 19 ? dateStr.substring(0, 19) : dateStr;
-                return LocalDateTime.parse(localPart, DateTimeFormatter.ISO_DATE_TIME).atZone(ZONE_SP);
+                // Fallback: Tenta parsear como data simples (YYYY-MM-DD)
+                return LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay(ZONE_SP);
             } catch (Exception ex) {
-                // Última tentativa: se for apenas data, adiciona um horário padrão
                 try {
-                    return LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay(ZONE_SP);
+                    // Último recurso: parser genérico do ZonedDateTime
+                    return ZonedDateTime.parse(dateStr).withZoneSameLocal(ZONE_SP);
                 } catch (Exception exc) {
                     // Se tudo falhar, retorna o horário atual
                     return ZonedDateTime.now(ZONE_SP);

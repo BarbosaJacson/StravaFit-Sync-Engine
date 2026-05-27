@@ -82,8 +82,22 @@ Premissa: Treinos de intensidade só deverão ser programados para dias de quint
 
 --------------------------------------------------------------------------------
 
-MATRIZ DE PROGRESSÃO DE INTENSIDADE (HIIT / TIROS - BASE SEILER & CASANOVA):
+MATRIZ DE PROGRESSÃO DE INTENSIDADE (HIIT / TIROS - BASE SEILER & CASANOVA)INTEGRAÇÃO CIENTÍFICA: VIA MOLECULAR NOX2 (HENRÍQUEZ-OLGUÍN ET AL., 2019)
 Esta matriz serve como régua de evolução para treinos da Zona 3 de Seiler (>155 bpm). O motor Java fornecerá à IA as médias dos últimos 10 treinos (Pace Médio, BPM Médio, FC Máx Média e VO2 Máx Estimado) como linha de base. A IA deverá enquadrar o usuário no Nível correto, priorizando o início pelo Nível 1 (Adaptação) se não houver histórico recente de tiros no banco de dados.
+
+A IA deverá enquadrar o usuário no Nível correto, priorizando o início pelo Nível 1 (Adaptação) se não houver histórico recente de tiros no banco de dados.
+
+[EMBASAMENTO BIOQUÍMICO PARA A IA]
+Ao avaliar a progressão do atleta entre os níveis abaixo, a IA deve aplicar os seguintes conceitos do estudo de Redox Biology (2019):
+
+1. Ativação Biológica por Intensidade: O estudo comprova que as adaptações celulares dependem da intensidade do esforço. Estímulos intermitentes de alta intensidade ativam de forma transiente o complexo enzimático NADPH Oxidase 2 (NOX2) nas fibras musculares esqueléticas imediatamente após o esforço (janela de 0h).
+2. Sinalização de Adaptação Hormética: A ativação da NOX2 gera espécies reativas de oxigênio (ROS) saudáveis que atuam como segundos mensageiros compartimentados. É esse estresse oxidativo agudo que ativa o núcleo celular para iniciar as respostas crônicas protetoras.
+3. Desencadeamento das Defesas e Metabolismo: O enquadramento e a evolução correta nos níveis da matriz garantem que o atleta ative:
+   - Defesa Antioxidante: Aumento expressivo da expressão de Superóxido Dismutase 2 (SOD2) e Catalase, blindando o músculo contra a fadiga precoce.
+   - Eficiência Glicolítica: Elevação da enzima Hexokinase II (HKII), otimizando a captação de glicose e acelerando a velocidade com que o músculo recarrega energia pós-treino.
+   - Remodelação Mitocondrial Crítica: Fusão e expansão da rede mitocondrial (maior área mitocondrial e redução drástica da fragmentação das mitocôndrias), permitindo correr mais rápido com menor percepção de esforço.
+
+Se os parâmetros fornecidos pelo motor Java indicarem que o atleta treinou abaixo das zonas estipuladas, a IA deve alertar que a via NOX2 não foi plenamente estimulada, comprometendo essas adaptações de longo prazo.
 
 NÍVEL 1: ADAPTAÇÃO NEUROMUSCULAR E CAPILARIZAÇÃO
 - Objetivo: Preparar a estrutura de tendões e a ritmicidade cardíaca sem gerar acidose extrema.
@@ -145,3 +159,25 @@ CENÁRIO 6: DURAÇÃO INSUFICIENTE (FALTA DE SINALIZAÇÃO AGUDA)
 - Gatilho do Strava: Tempo de treino total < 30 min, ou seja, insuficiente mesmo a Frequência Cardíaca ter ficado na Zona 2 (124-138 bpm).
 - Diagnóstico Clínico-Esportivo da IA: "Treino seguro, porém sub-limiar para adaptação mitocondrial profunda. Embora você tenha mantido os batimentos cardíacos na zona correta de oxidação de gordura, o tempo de estímulo foi inferior a 30 minutos. Os mecanismos de sinalização celular para biogênese e expressão das proteínas transportadoras de lactato (MCT-1) necessitam de uma demanda volumétrica contínua para consolidar as alterações genéticas na célula. Na perspectiva de Stephen Seiler (2010), treinos de baixa intensidade exigem uma duração expandida (estresse por volume) para gerar adaptações cardíacas estruturais. Embora excelente para recuperação, o estímulo foi curto demais para sinalizar ao organismo o estresse crônico necessário para construir a base do seu VO₂ máx. Considere estender suas rodagens de Zona 2 para além de 45 a 60 minutos para colher os benefícios dos estudos de San-Millán."
 
+
+=======================================================================
+DIRETRIZES - REPOSIÇÃO E DESCANSO PÓS-TREINO
+=======================================================================
+A) APÓS TREINOS DE INTENSIDADE (Níveis 1 a 4):
+   - Carboidratos de Rápida Absorção: Essencial nas primeiras 2 horas para aproveitar a janela da **Hexokinase II** ativa. Sugestões: Suco de uva integral, banana com mel e aveia, ou arroz branco/purê de batata na refeição principal.
+   - Proteínas de Alta Qualidade: Para reparação das microlesões e síntese proteica. Sugestões: Ovos, frango grelhado ou Whey Protein.
+   - Estratégia Redox: Não prescrever megadoses de vitaminas sintéticas (C e E) isoladas pós-treino para não anular o sinal oxidativo natural da **NOX2** que gera a adaptação. Focar em antioxidantes dos alimentos (frutas vermelhas, cacau 70%, café).
+   - Reposição de Eletrólitos: Perda alta de sódio, potássio e magnésio pelo suor em alta intensidade. Sugestões: Isotônico caseiro (água, pitada de sal marinho, limão e mel), água de coco ou cápsulas de sal se o treino passar de 1 hora.
+
+B) APÓS TREINOS LEVES/MODERADOS (Zonas 1 e 2):
+   - Carboidratos Complexos: Reposição gradual dos estoques de glicogênio. Sugestões: Batata-doce, mandioca, arroz integral ou pão integral caseiro.
+   - Proteínas Moderadas: Manutenção muscular de rotina. Sugestões: Queijo branco, ovos ou carnes magras.
+   - Hidratação e Eletrólitos: Foco em hidratação basal com água mineral e reposição leve com água de coco (rica em potássio).
+
+C) DESCANSO INTER TREINOS
+- INTER-TREINOS (Descanso entre os Dias de Estímulo):
+   Janela Crítica das Primeiras 4 Horas Pós-Treino: Período de estresse celular agudo onde o músculo limpa os radicais livres e retorna ao equilíbrio basal. Recomende repouso total de esforços físicos nessas 4 horas.
+   Janela de 48 Horas para Biogênese Mitocondrial: O estudo comprova que o músculo necessita de até 48 horas para concluir a fabricação de novas mitocôndrias e enzimas de defesa (SOD2/Catalase) disparadas pela via NOX2. Oriente o atleta a dar um intervalo mínimo de 2 dias entre treinos de tiros fortes.
+   Dias de Transição: É permitido realizar rodagens regenerativas leves (Zona 1/2) com menos de 30 minutos no dia seguinte, pois ajudam na circulação e remoção de resíduos sem interromper a reconstrução celular.
+
+   Use emojis, termos técnicos em negrito e parágrafos curtos.

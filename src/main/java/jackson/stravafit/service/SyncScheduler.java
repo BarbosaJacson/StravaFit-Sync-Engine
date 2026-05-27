@@ -60,7 +60,6 @@ public class SyncScheduler {
 
     // AGENDAMENTO ÚNICO: Ter, Qui, Sab às 07:00 (Relatório Consolidado)
     @Scheduled(cron = "0 0 7 * * TUE,THU,SAT")
-    @Async
     public void scheduledSync() {
         log.info("=== [SINCRONIZAÇÃO AGENDADA DISPARADA] ===");
         executarSincronizacao(this.accessToken);
@@ -114,13 +113,19 @@ public class SyncScheduler {
                         log.info("-> NOVO TREINO DETECTADO PARA O DIA: {}", activity.getName());
                         geminiDisponivel = processarEEnviar(tokenParaUsar, activity);
                         treinoHojeDetectado = true;
-                    } else {
+                        break;// Se processamos o treino de hoje, paramos por aqui.
+                } else {
                         // CARGA HISTÓRICA: Apenas persiste sem disparar notificações
                         log.info("-> Carregando atividade histórica para o banco: {} ({})", activity.getName(), activityDate);
                         persistirSemNotificar(tokenParaUsar, activity);
                     }
                 } catch (Exception e) {
                     log.error("[ERRO] Falha ao processar atividade individual {}: {}", activity.getId(), e.getMessage());
+                    // Se houver erro de pagamento (402) ou token (401), interrompemos para evitar loop de erros
+                    if (e.getMessage().contains("402") || e.getMessage().contains("401")) {
+                        log.error("[CRÍTICO] Falha de permissão no Strava. Interrompendo ciclo.");
+                        return false;
+                    }
                 } finally {
                     atividadesEmProcessamento.remove(activity.getId());
                 }
@@ -138,6 +143,7 @@ public class SyncScheduler {
                 log.info("[RECOVERY] Nenhum treino novo hoje. Verificando pendências ou atualizando última análise...");
                 garantirEEnviarUltimoInsight();
             }
+            log.info("[SYNC] Ciclo de sincronização finalizado com sucesso. Aguardando ociosidade.");
             return true;
 
         } catch (HttpClientErrorException.Unauthorized e) {
@@ -205,7 +211,7 @@ public class SyncScheduler {
             String zonaDominante
     ) {}
 
-    private void garantirEEnviarUltimoInsight() {
+    public void garantirEEnviarUltimoInsight() {
         activityRepository.findTop10ByOrderByStartDateDesc().stream().findFirst().ifPresent(activity -> { // activity is ActivityEntity
             log.info("[GEMINI] Forçando nova análise técnica para o último treino: {}", activity.getName());
             
