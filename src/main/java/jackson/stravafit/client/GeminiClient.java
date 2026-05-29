@@ -10,6 +10,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.ResourceAccessException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Arrays;
 
 @Slf4j
 @Component
@@ -17,9 +19,14 @@ public class GeminiClient {
 
     private final RestClient restClient;
     private final String apiKey;
+    private final List<String> models;
+    private final AtomicInteger currentModelIndex = new AtomicInteger(0);
     private static final int MAX_RETRIES = 3;
 
-    public GeminiClient(RestClient.Builder builder, @Value("${gemini.api.key}") String apiKey) {
+
+    public GeminiClient(RestClient.Builder builder, 
+                        @Value("${gemini.api.key}") String apiKey,
+                        @Value("${gemini.models.list:gemini-1.5-flash}") String modelsConfig) {
         // 1. Criamos a fábrica definindo a paciência de 5 minutos (300000ms) para ler os dados
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setReadTimeout(300000);
@@ -32,6 +39,10 @@ public class GeminiClient {
                 .build();
 
         this.apiKey = apiKey;
+        this.models = Arrays.stream(modelsConfig.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 
     public String getInsight(String prompt) {
@@ -47,31 +58,49 @@ public class GeminiClient {
             )
         );
 
-        for (int i = 0; i < MAX_RETRIES; i++) {
+        // Loop principal para tentar gerar o insight, alternando modelos em caso de 429
+        for (int totalAttempt = 0; totalAttempt < models.size() + 2; totalAttempt++) { 
+            // Seleciona o modelo atual baseado no índice atômico
+            String currentModel = models.get(currentModelIndex.get() % models.size());
+            
             try {
-                // Retorno tipado corretamente com ParameterizedTypeReference para evitar warnings
+                log.info("[GEMINI] Tentando consulta com o modelo: {}", currentModel);
+                
                 Map<String, Object> response = restClient.post()
-                        .uri("/v1beta/models/gemini-2.5-flash:generateContent?key={key}", apiKey) // <-- Mudei para 2.5-flash
+                        .uri("/v1/models/{model}:generateContent?key={key}", currentModel, apiKey) 
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(requestBody)
                         .retrieve()
                         .body(new ParameterizedTypeReference<>() {});
 
                 return response != null ? extractTextFromResponse(response) : "Resposta vazia da IA.";
-            } catch (Exception e) {
-                log.error("[GEMINI] Tentativa {} falhou: {}", (i + 1), e.getMessage());
-                
-                // Tratamento robusto de erros de rede e limites de cota
+            } catch (Exception e) { // Captura qualquer exceção durante a chamada REST
                 String errorMsg = e.getMessage() != null ? e.getMessage() : "";
+                log.error("[GEMINI] Falha no modelo {}: {}", currentModel, errorMsg);
+
+                // Tratamento robusto de erros de rede e limites de cota
                 boolean isNetworkError = e instanceof ResourceAccessException || 
                                          errorMsg.contains("Broken pipe") || 
                                          errorMsg.contains("Connection reset");
-                boolean isRateLimit = errorMsg.contains("429") || errorMsg.contains("503");
+                boolean isRateLimit = errorMsg.contains("429");
+                boolean isNotFound = errorMsg.contains("404");
+                boolean isServiceUnavailable = errorMsg.contains("503");
 
-                if (isNetworkError || isRateLimit) {
+                // Se o erro for de cota (429) ou modelo não encontrado (404), rotacionamos imediatamente
+                if (isRateLimit || isNotFound) {
+                    currentModelIndex.incrementAndGet(); // Avança para o próximo modelo
+                    log.warn("[GEMINI] Modelo {} falhou ({}). Tentando o próximo da lista...", currentModel, isRateLimit ? "429-Cota" : "404-NãoExiste");
+                    
+                    // Pequena pausa para não queimar as tentativas em milissegundos
+                    try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                    
+                    continue; // Pula para a próxima iteração do loop principal, que tentará o novo modelo
+                } 
+                // Para erros de rede ou serviço indisponível (503), tentamos novamente com o mesmo modelo após um delay
+                else if (isNetworkError || isServiceUnavailable) {
                     try {
-                        log.info("[GEMINI] Falha de rede/cota detectada. Aguardando para nova tentativa...");
-                        Thread.sleep(2000L * (i + 1)); 
+                        log.info("[GEMINI] Erro de rede no modelo {}. Aguardando reprocessamento...", currentModel);
+                        Thread.sleep(3000L); 
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                     }
@@ -79,8 +108,9 @@ public class GeminiClient {
                     break;
                 }
             }
-        }
-        return "Erro persistente ao consultar o Gemini após várias tentativas.";
+        } // Fim do loop principal
+        log.error("[GEMINI] Todas as tentativas de geração de insight falharam após esgotar retries e rodízio de modelos.");
+        return "Erro persistente ao gerar insight da IA após múltiplas tentativas.";
     }
 
     private String extractTextFromResponse(Map<String, Object> response) {
