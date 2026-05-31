@@ -21,8 +21,6 @@ public class GeminiClient {
     private final String apiKey;
     private final List<String> models;
     private final AtomicInteger currentModelIndex = new AtomicInteger(0);
-    private static final int MAX_RETRIES = 3;
-
 
     public GeminiClient(RestClient.Builder builder, 
                         @Value("${gemini.api.key}") String apiKey,
@@ -59,7 +57,7 @@ public class GeminiClient {
         );
 
         // Loop principal para tentar gerar o insight, alternando modelos em caso de 429
-        for (int totalAttempt = 0; totalAttempt < models.size() + 2; totalAttempt++) { 
+        for (int totalAttempt = 0; totalAttempt < models.size(); totalAttempt++) {
             // Seleciona o modelo atual baseado no índice atômico
             String currentModel = models.get(currentModelIndex.get() % models.size());
             
@@ -86,24 +84,17 @@ public class GeminiClient {
                 boolean isNotFound = errorMsg.contains("404");
                 boolean isServiceUnavailable = errorMsg.contains("503");
 
-                // Se o erro for de cota (429) ou modelo não encontrado (404), rotacionamos imediatamente
-                if (isRateLimit || isNotFound) {
+                // Para qualquer erro de cota, indisponibilidade ou rede, rotacionamos para o próximo modelo
+                if (isRateLimit || isNotFound || isServiceUnavailable || isNetworkError) {
                     currentModelIndex.incrementAndGet(); // Avança para o próximo modelo
-                    log.warn("[GEMINI] Modelo {} falhou ({}). Tentando o próximo da lista...", currentModel, isRateLimit ? "429-Cota" : "404-NãoExiste");
+                    log.warn("[GEMINI] Modelo {} falhou (Status: {}). Rotacionando...", 
+                            currentModel, isRateLimit ? "429-Cota" : (isNotFound ? "404-NãoEncontrado" : "Erro-Rede/503"));
                     
-                    // Pequena pausa para não queimar as tentativas em milissegundos
-                    try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                    // Pausa progressiva curta para respeitar o limite da API sem travar o Cloud Run
+                    long rotationDelay = 2000L + (totalAttempt * 1000L); 
+                    try { Thread.sleep(rotationDelay); } catch (InterruptedException ignored) {}
                     
                     continue; // Pula para a próxima iteração do loop principal, que tentará o novo modelo
-                } 
-                // Para erros de rede ou serviço indisponível (503), tentamos novamente com o mesmo modelo após um delay
-                else if (isNetworkError || isServiceUnavailable) {
-                    try {
-                        log.info("[GEMINI] Erro de rede no modelo {}. Aguardando reprocessamento...", currentModel);
-                        Thread.sleep(3000L); 
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    }
                 } else {
                     break;
                 }
