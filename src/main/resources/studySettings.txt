@@ -42,6 +42,12 @@ MODELO TRIDIMENSIONAL DE INTENSIDADE DE SEILER:
 - Zona 3 de Seiler (Alta Intensidade): Níveis de lactato severos (> 4 mM). Esforço executado acima de 85% a 90% do VO2 máx (Treinos de Tiro / HIIT). Zona voltada para o ganho de teto do VO2 máx.
 
 --------------------------------------------------------------------------------
+🏷️ Legenda: Índice de Eficiência Aeróbica 
+🔴 < 1,00 | Regular (Abaixo da Média): Indica que o custo cardiovascular foi proporcionalmente alto para o ritmo desenvolvido. Comum em treinos longos com muita fadiga acumulada, dias de calor intenso ou treinos de tiros muito fortes.  
+🟡 1,00 a 1,05 | Bom / Estável: É o seu padrão muito bem consolidado para treinos longos e rodagens constantes de 10 km a 13 km. Mostra uma base aeróbica sólida e saudável.  
+🟢 1,06 a 1,10 | Ótimo / Eficiente: Indica excelente economia de corrida. O seu coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo de corrida mais rápido, muito comum nos seus treinos de 8 km.  
+🔵 > 1,10 | Excelente / Altamente Otimizado: Seu pico máximo de eficiência mecânica e cardiovascular. O corpo gastou o mínimo de energia possível para entregar a maior velocidade da planilha.  
+--------------------------------------------------------------------------------
 
 DIRETRIZES GERAIS DE RECOMENDAÇÃO PRÁTICA (O QUE A IA DEVE INDICAR AO USUÁRIO DO STRAVA):
 1. Estímulo Crônico Aeróbico Controlado (Zona 2): Indicar treinos onde a frequência cardíaca permaneça predominantemente na zona de oxidação de gordura (geralmente entre 60% e 72% da FC máxima). Justificar ao usuário que isso melhora a depuração/clareamento de lactato e aumenta a densidade mitocondrial muscular.

@@ -6,15 +6,15 @@ import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.TokenResponse;
 import jackson.stravafit.repository.ActivityRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Service;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
@@ -30,8 +30,13 @@ public class SyncScheduler {
     private final TelegramClient telegramClient;
     private final ActivityRepository activityRepository;
     
+    private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
+
     private volatile String accessToken; // Garante visibilidade entre múltiplas threads
     private final String refreshToken;
+
+    @Value("${sync.on-startup:false}")
+    private boolean syncOnStartup;
 
     // Cache em memória para evitar que duas threads processem a mesma atividade simultaneamente
     private final Set<Long> atividadesEmProcessamento = ConcurrentHashMap.newKeySet();
@@ -52,32 +57,27 @@ public class SyncScheduler {
         this.refreshToken = refreshToken;
     }
 
+    /**
+     * Dispara a sincronização ao iniciar, apenas se a propriedade sync.on-startup for true.
+     */
     @EventListener(ApplicationReadyEvent.class)
-    public void syncOnStartup() {
-        log.info("[STARTUP] Iniciando motor e verificando pendências...");
-        executarSincronizacao(this.accessToken);
+    public void onApplicationReady() {
+        if (syncOnStartup) {
+            log.info("[STARTUP] Gatilho de inicialização ativado.");
+            scheduledSync();
+        }
     }
 
-    // AGENDAMENTO ÚNICO: Ter, Qui, Sab às 07:00 (Relatório Consolidado)
-    @Scheduled(cron = "0 0 7 * * TUE,THU,SAT")
+    /**
+     * Método mantido para chamadas via Webhook ou DebugController.
+     */
+    @Transactional
     public void scheduledSync() {
-        log.info("=== [SINCRONIZAÇÃO AGENDADA DISPARADA] ===");
+        log.info("=== [SINCRONIZAÇÃO DISPARADA] ===");
         executarSincronizacao(this.accessToken);
     }
 
-    // NOVO AGENDAMENTO: Ter, Qui, Sab às 05:05 (Checagem de Sono e Plano Pré-Treino)
-    @Scheduled(cron = "0 5 5 * * TUE,THU,SAT")
-    public void scheduledSleepCheck() {
-        log.info("=== [AGENDAMENTO 05:05] Checagem pré-treino disparada. ===");
-    }
-
-    // TAREFA DE RECUPERAÇÃO: Tenta "curar" atividades sem insight a cada 1 hora
-    @Scheduled(cron = "0 0 * * * *")
-    public void recoveryTask() {
-        log.info("[RECOVERY] Verificando se há treinos pendentes de análise...");
-        garantirEEnviarUltimoInsight();
-    }
-
+    @Transactional
     public boolean executarSincronizacao(String tokenParaUsar) {
         boolean geminiDisponivel = true;
         try {
@@ -88,7 +88,7 @@ public class SyncScheduler {
                 return false;
             }
 
-            LocalDate today = LocalDate.now();
+            LocalDate today = LocalDate.now(ZONE_SP);
             boolean treinoHojeDetectado = false;
 
             for (StravaActivity activity : response.activities()) {
@@ -106,8 +106,8 @@ public class SyncScheduler {
                     // Parse da data da atividade
                     String dateStr = activity.getStartDateLocal();
                     LocalDate activityDate = (dateStr.contains("Z") || dateStr.contains("+")) 
-                            ? ZonedDateTime.parse(dateStr).toLocalDate() 
-                            : LocalDate.parse(dateStr.substring(0, 10));
+                            ? ZonedDateTime.parse(dateStr).withZoneSameInstant(ZONE_SP).toLocalDate() 
+                            : LocalDate.parse(dateStr.substring(0, 10)); // Formato simplificado yyyy-MM-dd
 
                     if (activityDate.isEqual(today)) {
                         log.info("-> NOVO TREINO DETECTADO PARA O DIA: {}", activity.getName());
@@ -211,6 +211,7 @@ public class SyncScheduler {
             String zonaDominante
     ) {}
 
+    @Transactional
     public void garantirEEnviarUltimoInsight() {
         activityRepository.findTop10ByOrderByStartDateDesc().stream().findFirst().ifPresent(activity -> { // activity is ActivityEntity
             log.info("[GEMINI] Forçando nova análise técnica para o último treino: {}", activity.getName());
@@ -220,7 +221,8 @@ public class SyncScheduler {
             
             if (isValidInsight(novoInsight)) {
                 activity.setGeminiInsight(novoInsight);
-                activityRepository.save(activity);
+                // saveAndFlush garante que o insight seja gravado antes do container entrar em ociosidade
+                activityRepository.saveAndFlush(activity);
                 telegramClient.sendMessage("ANÁLISE ATUALIZADA DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + novoInsight);
                 log.info("[TELEGRAM] Nova análise enviada com sucesso.");
             } else {

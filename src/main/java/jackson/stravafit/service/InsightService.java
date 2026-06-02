@@ -4,6 +4,7 @@ import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.repository.ActivityRepository;
+import org.springframework.transaction.annotation.Propagation;
 import jackson.stravafit.model.WorkoutPrescriptionEntity;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,7 @@ public class InsightService {
     private final int hrMaxConfig;
     private final int hrResting;
     private final int idadeAtleta;
+    private final String nomeAtleta;
     private final ActivitySummaryRepository activitySummaryRepository;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
@@ -46,7 +48,8 @@ public class InsightService {
                           KnowledgeService knowledgeService,
                           @Value("${atleta.hr-max:173}") int hrMaxConfig,
                           @Value("${atleta.hr-resting:53}") int hrResting,
-                          @Value("${atleta.idade:47}") int idadeAtleta) {
+                          @Value("${atleta.idade:47}") int idadeAtleta,
+                          @Value("${atleta.nome:Jacson}") String nomeAtleta) {
         this.geminiClient = geminiClient;
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
@@ -55,6 +58,7 @@ public class InsightService {
         this.hrMaxConfig = hrMaxConfig;
         this.hrResting = hrResting;
         this.idadeAtleta = idadeAtleta;
+        this.nomeAtleta = nomeAtleta;
     }
 
     @Transactional
@@ -87,7 +91,7 @@ public class InsightService {
         return generateInsight(entity.getId(), entity.getName(), entity.getDistanceKm(), entity.getStartDate(), averageSpeed, analysis);
     }
 
-    private String generateInsight(Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
+    public String generateInsight(Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
         // 1. Parse de data e preparação
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
         String proximoTreinoData = calcularProximaDataTreino(activityDate);
@@ -104,6 +108,15 @@ public class InsightService {
         
         String cleanResult = removeXmlBlock(result);
 
+        // Persistimos o sumário e a prescrição usando um método isolado para evitar UnexpectedRollbackException
+        persistirDadosTecnicos(activityId, activityDate, metrics, cleanResult, result);
+
+        return sanitizeOutput(cleanResult);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected void persistirDadosTecnicos(Long activityId, ZonedDateTime activityDate, SessionMetrics metrics, String cleanResult, String rawAiResponse) {
+        try {
         // 4. PERSISTÊNCIA NO SUMÁRIO DE PERFORMANCE
         ActivitySummaryEntity summary = ActivitySummaryEntity.builder()
                 .activityId(activityId)
@@ -118,15 +131,16 @@ public class InsightService {
                 .build();
         
         activitySummaryRepository.saveAndFlush(summary);
-        
-        // 5. Extração da prescrição futura
-        extractAndSavePrescription(activityId, result, metrics.safeDistance());
+        log.info("[DB] Sumário de performance salvo para atividade: {}", activityId);
 
-        return sanitizeOutput(cleanResult);
+        extractAndSavePrescription(activityId, rawAiResponse, metrics.safeDistance());
+        } catch (Exception e) {
+            log.error("[DB] Falha crítica ao persistir dados técnicos, mas a análise será enviada: {}", e.getMessage());
+        }
     }
 
     // Classe auxiliar interna para transportar as métricas processadas
-    private record SessionMetrics(
+    public record SessionMetrics(
             double fcMedia, 
             double fcMax, 
             int duracao, 
@@ -239,6 +253,7 @@ public class InsightService {
         double histFcMaxMedia = 0;
         double histFcMedioDasMedias = 0;
         double histPaceMedioSegundos = 0;
+        double histEfficiencyIndex = 0;
 
         if (!historico.isEmpty()) {
             String datasHistorico = historico.stream()
@@ -262,6 +277,11 @@ public class InsightService {
                     .filter(a -> a.getDistanceKm() != null && a.getDistanceKm() > 0 && a.getTotalTimeMinutes() != null)
                     .mapToDouble(a -> (a.getTotalTimeMinutes() * 60.0) / a.getDistanceKm())
                     .average().orElse(0);
+
+            histEfficiencyIndex = historico.stream()
+                    .filter(a -> a.getDistanceKm() != null && a.getAverageHeartRate() != null && a.getAverageHeartRate() > 0 && a.getTotalTimeMinutes() != null && a.getTotalTimeMinutes() > 0)
+                    .mapToDouble(a -> (a.getDistanceKm() * 1000.0) / (a.getAverageHeartRate() * a.getTotalTimeMinutes()))
+                    .average().orElse(0);
         }
 
         String workoutIntensityType = determineWorkoutIntensityType(metrics.stdDev(), metrics.fcMaxPercentage());
@@ -270,8 +290,9 @@ public class InsightService {
         StringBuilder sb = new StringBuilder();
         sb.append("SISTEMA: Motor de Classificação Fisiológica StravaFit.\n");
         sb.append("ATIVIDADE: ").append(name).append("\n");
-        sb.append(String.format("PERFIL DO ATLETA: %d anos | FC Máx: %d | FC Repouso: %d | VO2 Est: %.1f\n", idadeAtleta, hrMaxConfig, hrResting, metrics.vo2MaxEstimado()));
-        sb.append("REGRA: Retorne EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' do cenário identificado no arquivo abaixo, adaptando o tom para a idade do atleta.\n\n");
+        sb.append(String.format("PERFIL DO ATLETA: %s, %d anos | FC Máx: %d | FC Repouso: %d | VO2 Est: %.1f\n", nomeAtleta, idadeAtleta, hrMaxConfig, hrResting, metrics.vo2MaxEstimado()));
+        sb.append("REGRA: Retorne EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' do cenário identificado no arquivo abaixo. ")
+          .append("IMPORTANTE: Dê o feedback de forma amigável e motivadora, tratando o atleta pelo nome ").append(nomeAtleta).append(".\n\n");
 
         sb.append("--- BASE DE CONHECIMENTO (studySettings) ---\n");
         sb.append(scientificContext).append("\n\n");
@@ -280,7 +301,8 @@ public class InsightService {
                 .append(String.format("- VO2 Máx Médio: %.1f ml/kg/min\n", histVo2Medio))
                 .append(String.format("- FC Máxima Média: %d bpm\n", (int)histFcMaxMedia))
                 .append(String.format("- FC Média Geral: %d bpm\n", (int)histFcMedioDasMedias))
-                .append(String.format("- Pace Médio: %s min/km\n\n", formatSecondsToPace(histPaceMedioSegundos)));
+                .append(String.format("- Pace Médio: %s min/km\n", formatSecondsToPace(histPaceMedioSegundos)))
+                .append(String.format("- Eficiência Média: %.3f (m/bpm*min)\n\n", histEfficiencyIndex));
 
         workoutPrescriptionRepository.findByScheduledDate(date.toLocalDate()).ifPresent(plano -> sb.append("--- TREINO PROGRAMADO PARA ESTA DATA ---\n")
                 .append("- Tipo Planejado: ").append(plano.getType()).append("\n")
@@ -310,22 +332,23 @@ public class InsightService {
         sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n").append(dataFormatada).append("\n");
         sb.append("📌 Cenário Detectado: [Título]\n");
         sb.append("📊 Métricas: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append((int)metrics.fcMedia())
-                .append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | VO2: ")
+                .append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante())
+                .append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ")
                 .append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
 
-        sb.append("🩺 DIAGNÓSTICO FISIOLÓGICO:\n")
-                .append("[Transcreva aqui EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' da BASE de conhecimento para o cenário identificado]\n\n")
+        sb.append("🩺 DIAGNÓSTICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n")
+                .append("[Transcreva aqui o texto do campo 'Diagnóstico Clínico-Esportivo da IA' da BASE de conhecimento para o cenário identificado, dirigindo-se amigavelmente a ").append(nomeAtleta).append("]\n\n")
 
-                .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO:\n")
-                .append("[Análise técnica curta de Pace vs BPM vs Altimetria e identificação da Zona Cardíaca predominante]\n\n");
+                .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n")
+                .append("[Análise técnica sucinta correlacionando fcMedia, Pace, Altimetria e o cálculo final de efficiencyIndex. Consulte no arquivo studySettings especificamente o tópico '🏷️ Legenda: Índice de Eficiência Aeróbica' para classificar a qualidade e o status do treino em relação à eficiência. Trasncreva a Legenda apropriada: Índice de Eficiência Aeróbica do arquivo studySettings]\n\n");
 
-        sb.append("🏃‍♂️ CONCLUSÃO E PRÓXIMO PASSO:\n")
-                .append("[Explique o impacto na saúde mitocondrial usando metáforas do estudo e dê um conselho prático final].\n\n");
+        sb.append("🏃\u200D♂️ CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n")
+                .append("[Explique para ").append(nomeAtleta).append(" o impacto na saúde mitocondrial, diferenciando os benefícios conforme o estímulo dado: Alta Intensidade (sinalização hormética e potência) ou Baixa Intensidade (biogênese mitocondrial e eficiência oxidativa). Use as metáforas contidas no estudo e dê um conselho prático final personalizado para ele].\n\n");
 
-        sb.append("--- REPOSIÇÃO E DESCANSO PÓS-TREINO ---\n")
+        sb.append("--- REPOSIÇÃO E DESCANSO PÓS-TREINO PARA ").append(nomeAtleta).append(" ---\n")
                 .append("CONSULTE o CONTEXTO CIENTÍFICO (studySettings) na seção 'DIRETRIZES PARA ALIMENTAÇÃO DE REPOSIÇÃO E DESCANSO'. ")
-                .append("Com base nessas diretrizes, forneça recomendações específicas para o atleta, considerando a intensidade e duração do treino atual.\n")
-                .append("[Recomendações de reposição nutricional e descanso pós-treino extraídas do CONTEXTO CIENTÍFICO]\n\n");
+                .append("Com base nessas diretrizes, forneça recomendações específicas para ").append(nomeAtleta).append(", considerando a intensidade e duração do treino atual.\n")
+                .append("[Orientações de reposição e descanso extraídas do CONTEXTO CIENTÍFICO dirigidas a ").append(nomeAtleta).append("]\n\n");
 
         sb.append("--- PRESCRIÇÃO STRAFIT PREDICT ---\n");
         sb.append("DATA PROGRAMADA: ").append(proximoTreinoData).append("\n\n")
@@ -387,7 +410,7 @@ public class InsightService {
         return sb.toString();
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void extractAndSavePrescription(Long activityId, String rawAiResponse, Double distanceKm) {
         try {
             String cleanResponse = rawAiResponse.replace("```xml", "").replace("```", "").trim();
