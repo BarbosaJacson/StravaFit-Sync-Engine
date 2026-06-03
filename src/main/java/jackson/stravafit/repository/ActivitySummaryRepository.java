@@ -7,5 +7,5 @@ import java.util.Optional;
 
 @Repository
 public interface ActivitySummaryRepository extends JpaRepository<ActivitySummaryEntity, Long> {
-    Optional<ActivitySummaryEntity> findByActivityId(Long activityId);
+
 }

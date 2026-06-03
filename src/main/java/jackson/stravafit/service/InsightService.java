@@ -4,6 +4,7 @@ import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.repository.ActivityRepository;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.transaction.annotation.Propagation;
 import jackson.stravafit.model.WorkoutPrescriptionEntity;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
@@ -20,6 +21,7 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+
 @Slf4j
 @Service
 public class InsightService {
@@ -32,6 +34,7 @@ public class InsightService {
     private final int hrResting;
     private final int idadeAtleta;
     private final String nomeAtleta;
+    private final InsightService self; // Injeção para garantir o funcionamento do @Transactional
     private final ActivitySummaryRepository activitySummaryRepository;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
@@ -45,6 +48,7 @@ public class InsightService {
                           ActivityRepository activityRepository,
                           WorkoutPrescriptionRepository workoutPrescriptionRepository,
                           ActivitySummaryRepository activitySummaryRepository,
+                          @Lazy InsightService self,
                           KnowledgeService knowledgeService,
                           @Value("${atleta.hr-max:173}") int hrMaxConfig,
                           @Value("${atleta.hr-resting:53}") int hrResting,
@@ -54,6 +58,7 @@ public class InsightService {
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
         this.activitySummaryRepository = activitySummaryRepository;
+        this.self = self;
         this.knowledgeService = knowledgeService;
         this.hrMaxConfig = hrMaxConfig;
         this.hrResting = hrResting;
@@ -108,32 +113,35 @@ public class InsightService {
         
         String cleanResult = removeXmlBlock(result);
 
-        // Persistimos o sumário e a prescrição usando um método isolado para evitar UnexpectedRollbackException
-        persistirDadosTecnicos(activityId, activityDate, metrics, cleanResult, result);
+        // Chamamos via 'self' (Proxy) para garantir que o isolamento de transação funcione na nuvem
+        self.persistirDadosTecnicos(activityId, activityDate, metrics, cleanResult, result);
 
         return sanitizeOutput(cleanResult);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    protected void persistirDadosTecnicos(Long activityId, ZonedDateTime activityDate, SessionMetrics metrics, String cleanResult, String rawAiResponse) {
+    public void persistirDadosTecnicos(Long activityId, ZonedDateTime activityDate, SessionMetrics metrics, String cleanResult, String rawAiResponse) {
         try {
-        // 4. PERSISTÊNCIA NO SUMÁRIO DE PERFORMANCE
-        ActivitySummaryEntity summary = ActivitySummaryEntity.builder()
-                .activityId(activityId)
-                .startDate(activityDate.toLocalDateTime())
-                .distanceKm(metrics.safeDistance())
-                .totalTimeMinutes(metrics.duracao())
-                .averageHeartRate(metrics.fcMedia())
-                .maxHeartRate((int) metrics.fcMax())
-                .dominantZone(metrics.zonaPredominante())
-                .efficiencyIndex(metrics.efficiencyIndex())
-                .aiAnalysisSummary(sanitizeOutput(cleanResult))
-                .build();
-        
-        activitySummaryRepository.saveAndFlush(summary);
-        log.info("[DB] Sumário de performance salvo para atividade: {}", activityId);
+            // Lógica de UPSERT: Busca existente ou cria novo para garantir atualização sem erro de duplicidade
+            ActivitySummaryEntity summary = activitySummaryRepository.findById(activityId)
+                    .orElse(new ActivitySummaryEntity());
 
-        extractAndSavePrescription(activityId, rawAiResponse, metrics.safeDistance());
+            // 4. ATUALIZAÇÃO/PREENCHIMENTO DOS CAMPOS
+            summary.setActivityId(activityId);
+            summary.setStartDate(activityDate.toLocalDateTime());
+            summary.setDistanceKm(metrics.safeDistance());
+            summary.setTotalTimeMinutes(metrics.duracao());
+            summary.setAverageHeartRate(metrics.fcMedia());
+            summary.setMaxHeartRate((int) metrics.fcMax());
+            summary.setDominantZone(metrics.zonaPredominante());
+            summary.setEfficiencyIndex(metrics.efficiencyIndex());
+            summary.setAiAnalysisSummary(sanitizeOutput(cleanResult));
+
+            activitySummaryRepository.saveAndFlush(summary);
+            log.info("[DB] Sumário de performance persistido/atualizado para atividade: {}", activityId);
+
+            // Importante: Chamar via 'self' também aqui para isolar a transação da prescrição
+            self.extractAndSavePrescription(activityId, rawAiResponse, metrics.safeDistance());
         } catch (Exception e) {
             log.error("[DB] Falha crítica ao persistir dados técnicos, mas a análise será enviada: {}", e.getMessage());
         }
@@ -340,7 +348,7 @@ public class InsightService {
                 .append("[Transcreva aqui o texto do campo 'Diagnóstico Clínico-Esportivo da IA' da BASE de conhecimento para o cenário identificado, dirigindo-se amigavelmente a ").append(nomeAtleta).append("]\n\n")
 
                 .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n")
-                .append("[Análise técnica sucinta correlacionando fcMedia, Pace, Altimetria e o cálculo final de efficiencyIndex. Consulte no arquivo studySettings especificamente o tópico '🏷️ Legenda: Índice de Eficiência Aeróbica' para classificar a qualidade e o status do treino em relação à eficiência. Trasncreva a Legenda apropriada: Índice de Eficiência Aeróbica do arquivo studySettings]\n\n");
+                .append("[Análise técnica sucinta correlacionando fcMedia, Pace, Altimetria e o cálculo final de efficiencyIndex. Consulte no arquivo studySettings especificamente o tópico '🏷️ Legenda: Índice de Eficiência Aeróbica' para classificar a qualidade e o status do treino em relação à eficiência. Transcreva a Legenda apropriada: Índice de Eficiência Aeróbica do arquivo studySettings]\n\n");
 
         sb.append("🏃\u200D♂️ CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n")
                 .append("[Explique para ").append(nomeAtleta).append(" o impacto na saúde mitocondrial, diferenciando os benefícios conforme o estímulo dado: Alta Intensidade (sinalização hormética e potência) ou Baixa Intensidade (biogênese mitocondrial e eficiência oxidativa). Use as metáforas contidas no estudo e dê um conselho prático final personalizado para ele].\n\n");
@@ -424,17 +432,20 @@ public class InsightService {
                 String scheduledDateStr = extractTagValue(xml, "scheduled_date");
 
                 if (scheduledDateStr != null) {
-                    log.info("[DB] Tentando persistir prescrição para a data: {}", scheduledDateStr);
-                    WorkoutPrescriptionEntity prescription = WorkoutPrescriptionEntity.builder()
-                            .activityId(activityId)
-                            .scheduledDate(LocalDate.parse(scheduledDateStr.replaceAll("[^0-9-]", "")))
-                            .type(extractTagValue(xml, "type"))
-                            .duration(extractTagValue(xml, "duration"))
-                            .intensity(extractTagValue(xml, "intensity"))
-                            .focus(extractTagValue(xml, "focus"))
-                            .distanceKm(distanceKm) // Agora usando o parâmetro passado corretamente
-                            .paceTarget(extractTagValue(xml, "method"))
-                            .build();
+                    log.info("[DB] Processando prescrição vinculada à atividade {} para a data: {}", activityId, scheduledDateStr);
+
+                    // Lógica de UPSERT para Prescrições: Busca por activityId para evitar duplicidade
+                    WorkoutPrescriptionEntity prescription = workoutPrescriptionRepository.findByActivityId(activityId)
+                            .orElse(new WorkoutPrescriptionEntity());
+
+                    prescription.setActivityId(activityId);
+                    prescription.setScheduledDate(LocalDate.parse(scheduledDateStr.replaceAll("[^0-9-]", "")));
+                    prescription.setType(extractTagValue(xml, "type"));
+                    prescription.setDuration(extractTagValue(xml, "duration"));
+                    prescription.setIntensity(extractTagValue(xml, "intensity"));
+                    prescription.setFocus(extractTagValue(xml, "focus"));
+                    prescription.setDistanceKm(distanceKm);
+                    prescription.setPaceTarget(extractTagValue(xml, "method"));
 
                     WorkoutPrescriptionEntity saved = workoutPrescriptionRepository.saveAndFlush(prescription);
                     log.info("[DB] Prescrição ID {} salva com sucesso para: {}", saved.getId(), saved.getScheduledDate());

@@ -10,5 +10,6 @@ import java.util.Optional;
 @Repository
 public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPrescriptionEntity, Long> {
 
+    Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
     Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
 }

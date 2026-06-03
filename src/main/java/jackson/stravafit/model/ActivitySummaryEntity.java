@@ -13,9 +13,8 @@ import java.time.LocalDateTime;
 @Builder
 public class ActivitySummaryEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    @Id // O ID do Strava agora é a chave primária oficial
+    private Long activityId;
 
     private LocalDateTime startDate;
 
@@ -34,7 +33,4 @@ public class ActivitySummaryEntity {
     @Column(columnDefinition = "TEXT")
     private String aiAnalysisSummary;
 
-    // Vínculo único para evitar duplicados no sumário
-    @Column(unique = true)
-    private Long activityId;
 }
