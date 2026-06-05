@@ -42,14 +42,17 @@ MODELO TRIDIMENSIONAL DE INTENSIDADE DE SEILER:
 - Zona 3 de Seiler (Alta Intensidade): Níveis de lactato severos (> 4 mM). Esforço executado acima de 85% a 90% do VO2 máx (Treinos de Tiro / HIIT). Zona voltada para o ganho de teto do VO2 máx.
 
 --------------------------------------------------------------------------------
-🏷️ Legenda: Índice de Eficiência Aeróbica 
+
+ÍNDICE DE EFICIÊNCIA AERÓBICA (Utilize para identificar a intensidade)
+🏷️ Legenda:  
 🔴 < 1,00 | Regular (Abaixo da Média): Indica que o custo cardiovascular foi proporcionalmente alto para o ritmo desenvolvido. Comum em treinos longos com muita fadiga acumulada, dias de calor intenso ou treinos de tiros muito fortes.  
-🟡 1,00 a 1,05 | Bom / Estável: É o seu padrão muito bem consolidado para treinos longos e rodagens constantes de 10 km a 13 km. Mostra uma base aeróbica sólida e saudável.  
+🟡 1,00 a 1,05 | Bom / Estável: É o seu padrão muito bem consolidado para treinos longos e rodagens constantes de 10 km a 16 km. Mostra uma base aeróbica sólida e saudável.  
 🟢 1,06 a 1,10 | Ótimo / Eficiente: Indica excelente economia de corrida. O seu coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo de corrida mais rápido, muito comum nos seus treinos de 8 km.  
 🔵 > 1,10 | Excelente / Altamente Otimizado: Seu pico máximo de eficiência mecânica e cardiovascular. O corpo gastou o mínimo de energia possível para entregar a maior velocidade da planilha.  
 --------------------------------------------------------------------------------
 
 DIRETRIZES GERAIS DE RECOMENDAÇÃO PRÁTICA (O QUE A IA DEVE INDICAR AO USUÁRIO DO STRAVA):
+
 1. Estímulo Crônico Aeróbico Controlado (Zona 2): Indicar treinos onde a frequência cardíaca permaneça predominantemente na zona de oxidação de gordura (geralmente entre 60% e 72% da FC máxima). Justificar ao usuário que isso melhora a depuração/clareamento de lactato e aumenta a densidade mitocondrial muscular.
 2. Evitar a Zona Cinzenta Constante: Alertar usuários que treinam sempre em alta intensidade (Frequência Cardíaca muito elevada que acumula lactato precocemente) de que eles estão gerando um estresse metabólico excessivo via glicólise e impedindo o desenvolvimento da flexibilidade metabólica basal.
 3. Recuperação Ativa e Adaptação: Incentivar o descanso adequado, ressaltando que as proteínas de controle de qualidade mitocondrial (como PGC-1a) precisam de períodos de recuperação para consolidar a biogênese.
@@ -89,7 +92,8 @@ Premissa: Treinos de intensidade só deverão ser programados para dias de quint
 --------------------------------------------------------------------------------
 
 MATRIZ DE PROGRESSÃO DE INTENSIDADE (HIIT / TIROS - BASE SEILER & CASANOVA)INTEGRAÇÃO CIENTÍFICA: VIA MOLECULAR NOX2 (HENRÍQUEZ-OLGUÍN ET AL., 2019)
-Esta matriz serve como régua de evolução para treinos da Zona 3 de Seiler (>155 bpm). O motor Java fornecerá à IA as médias dos últimos 10 treinos (Pace Médio, BPM Médio, FC Máx Média e VO2 Máx Estimado) como linha de base. A IA deverá enquadrar o usuário no Nível correto, priorizando o início pelo Nível 1 (Adaptação) se não houver histórico recente de tiros no banco de dados.
+Esta matriz serve como régua de evolução de progressão para treinos da Zona 3 de Seiler (>155 bpm). 
+A IA deverá enquadrar o usuário no Nível correto abaixo, iniciando pelo Nível 1 (Adaptação) se não houver histórico recente de tiros no banco de dados. A partir daí, analisar as médias dos últimos 10 treinos (Pace Médio, BPM Médio, FC Máx Média e VO2 Máx Estimado) e avançar evoluindo gradativamente para os demais Níveis 2 a 4.
 
 A IA deverá enquadrar o usuário no Nível correto, priorizando o início pelo Nível 1 (Adaptação) se não houver histórico recente de tiros no banco de dados.
 
