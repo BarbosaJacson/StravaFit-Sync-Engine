@@ -348,7 +348,15 @@ public class InsightService {
                 .append("[Transcreva aqui o texto do campo 'Diagnóstico Clínico-Esportivo da IA' da BASE de conhecimento para o cenário identificado, dirigindo-se amigavelmente a ").append(nomeAtleta).append("]\n\n")
 
                 .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n")
-                .append("[Análise técnica sucinta correlacionando fcMedia, Pace, Altimetria e o cálculo final de efficiencyIndex. Consulte no arquivo studySettings especificamente o tópico '🏷️ Legenda: Índice de Eficiência Aeróbica' para classificar a qualidade e o status do treino em relação à eficiência. Transcreva a Legenda apropriada: Índice de Eficiência Aeróbica do arquivo studySettings]\n\n");
+                .append("[Análise técnica sucinta correlacionando fcMedia, Pace, Altimetria e o cálculo final de efficiencyIndex. ")
+                .append("Consulte no arquivo studySettings especificamente o tópico '🏷️ Legenda: Índice de Eficiência Aeróbica' para classificar a qualidade e o status do treino em relação à eficiência. ")
+                .append("Transcreva a Legenda apropriada: Índice de Eficiência Aeróbica do arquivo studySettings. ")
+                .append("O motor Java fornecerá os dados do treino agendado na tabela 'workout_prescriptions' para a mesma data. ")
+                .append("Compare rigidamente o treino executado com o prescrito e classifique o status de cumprimento sob os seguintes critérios técnicos:\n")
+                .append("  - [CUMPRIDO]: Se o atleta executou o tipo de treino correto, respeitou as zonas cardíacas/alvos de ritmo e manteve o tempo de treino dentro de uma margem de tolerância de +/- 10% da duração prescrita.\n")
+                .append("  - [CUMPRIDO PARCIALMENTE]: Se o atleta respeitou o tipo de treino e a intensidade (faixa cardíaca/tiros), mas divergiu na duração por uma margem maior que 10% (abaixo ou acima do volume planejado).\n")
+                .append("  - [NÃO CUMPRIDO]: Se o atleta ignorou completamente a estrutura prescrita (ex: executou uma rodagem contínua em um dia agendado para treinos de tiro, ou treinou em zonas de estresse glicolítico quando a orientação era regenerativa).\n")
+                .append("Insira essa classificação de cumprimento de forma clara logo no início do diagnóstico técnico, justificando fisiologicamente as razões do enquadramento.]\n\n");
 
         sb.append("🏃\u200D♂️ CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n")
                 .append("[Explique para ").append(nomeAtleta).append(" o impacto na saúde mitocondrial, diferenciando os benefícios conforme o estímulo dado: Alta Intensidade (sinalização hormética e potência) ou Baixa Intensidade (biogênese mitocondrial e eficiência oxidativa). Use as metáforas contidas no estudo e dê um conselho prático final personalizado para ele].\n\n");
