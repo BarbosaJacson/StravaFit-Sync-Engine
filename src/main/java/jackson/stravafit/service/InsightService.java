@@ -6,6 +6,7 @@ import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.repository.ActivityRepository;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.data.domain.Sort;
 import jackson.stravafit.model.WorkoutPrescriptionEntity;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -206,7 +207,10 @@ public class InsightService {
 
         String comportamento = (secondHalf > firstHalf * 1.05) ? "subindo gradualmente (drift)" : "predominantemente estável";
         double fcMaxPercentage = (fcMax / hrMaxConfig) * 100;
-        double vo2MaxEstimado = 15.3 * ((double) hrMaxConfig / hrResting);
+        double vo2MaxEstimado = 0.0;
+        if (hrResting > 0 && fcMax > hrResting) {
+            vo2MaxEstimado = 15.3 * ((fcMax / hrResting));
+        }
 
         // Otimização: Calcula min e max elevation em um único stream
         DoubleSummaryStatistics elevStats = analysis.stream()
@@ -292,7 +296,7 @@ public class InsightService {
                     .average().orElse(0);
         }
 
-        String workoutIntensityType = determineWorkoutIntensityType(metrics.stdDev(), metrics.fcMaxPercentage());
+        String workoutIntensityType = detectarPadraoDeTreino(analysis, metrics);
         String dataFormatada = date.withZoneSameInstant(ZONE_SP).format(BRAZIL_FORMATTER);
 
         StringBuilder sb = new StringBuilder();
@@ -319,6 +323,20 @@ public class InsightService {
                 .append("- Foco Técnico: ").append(plano.getFocus()).append("\n\n")
                 .append("INSTRUÇÃO: Avalie se o atleta cumpriu o plano ou se houve desvio.\n\n"));
 
+        // Busca a penúltima prescrição para dar contexto de ciclo de treino
+        // Lógica aprimorada: Busca a prescrição mais recente ANTERIOR à data do treino atual.
+        workoutPrescriptionRepository.findAll().stream()
+                .filter(p -> p.getScheduledDate().isBefore(date.toLocalDate()))
+                .max(Comparator.comparing(WorkoutPrescriptionEntity::getScheduledDate))
+                .ifPresent(penultimatePlano -> {
+                    sb.append("--- REFERÊNCIA DO TREINO ANTERIOR PRESCRITO ---\n");
+                    sb.append(String.format("- Data: %s\n", penultimatePlano.getScheduledDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))));
+                    sb.append(String.format("- Duração: %s\n", penultimatePlano.getDuration()));
+                    sb.append(String.format("- Intensidade (Faixa de FC): %s\n", penultimatePlano.getIntensity()));
+                    sb.append(String.format("- Foco: %s\n\n", penultimatePlano.getFocus()));
+                    sb.append("INSTRUÇÃO: Use estes dados como referência do ciclo de treino anterior para avaliar a progressão ou fadiga do atleta.\n\n");
+                });
+
         sb.append("--- DADOS DO TREINO ATUAL ---\n");
         sb.append(String.format("- Duração: %d minutos\n", metrics.duracao()));
         sb.append(String.format("- FC Média: %.0f bpm | Máx: %.0f bpm\n", metrics.fcMedia(), metrics.fcMax()));
@@ -329,34 +347,35 @@ public class InsightService {
         sb.append(String.format("- Tipo de Intensidade Detectado: %s\n", workoutIntensityType));
         sb.append("------------------------------\n\n");
 
-        sb.append("TAREFA DE ANÁLISE TÉCNICA E CIENTÍFICA:\n")
-                .append("1. ANÁLISE DE INTENSIDADE:\n")
-                .append("   - Para ALTA_INTENSIDADE: Foque nos PICOS de Frequência Cardíaca e Ritmo na SÉRIE TEMPORAL. Ignore a média geral, pois ela é diluída pela recuperação.\n")
-                .append("   - Para BAIXA_INTENSIDADE: Foque na ESTABILIDADE e na manutenção rigorosa da Zona 2. Use o campo 'comportamento' para identificar drift cardíaco (desacoplamento aeróbico), validando a eficiência mitocondrial conforme San-Millán.\n")
-                .append("2. COMPARAÇÃO PLANO VS REAL: Se houver um 'TREINO PROGRAMADO' acima, compare-o rigorosamente com os dados reais. Valide se o atleta respeitou as zonas prescritas ou se houve desvio (ex: picos em dia de Zona 2).\n")
-                .append("3. ENQUADRAMENTO CIENTÍFICO: Classifique o impacto metabólico usando a BASE DE CONHECIMENTO (San-Millán, Seiler, Olguín). Explique como os picos ou a estabilidade afetaram a saúde mitocondrial e as vias de sinalização (como NOX2).\n")
-                .append("4. FORMATO: Monte o retorno estritamente no formato estruturado abaixo (SEM ASTERISCOS nos títulos e sem blocos de código).\n\n");
+        // INSTRUÇÃO DIRETA E IMPERATIVA PARA A IA
+        sb.append("TAREFA DE TRANSCRIÇÃO OBRIGATÓRIA:\n")
+          .append("1. O tipo de treino já foi definido como: '").append(workoutIntensityType).append("'.\n")
+          .append("2. Localize o cenário correspondente a este tipo na 'MATRIZ DE DECISÃO' dentro do arquivo 'studySettings.txt'.\n")
+          .append("3. Transcreva EXATAMENTE o texto do campo 'Diagnóstico Clínico-Esportivo da IA' para o cenário encontrado.\n")
+          .append("4. Monte a resposta final seguindo o formato estruturado abaixo, preenchendo os campos solicitados.\n\n");
 
         sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n").append(dataFormatada).append("\n");
-        sb.append("📌 Cenário Detectado: [Título]\n");
-        sb.append("📊 Métricas: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append((int)metrics.fcMedia())
+        sb.append("📌 Cenário Detectado: [Título do Cenário]\n");
+        sb.append("⚡ Intensidade do Estímulo: [ANÁLISE CRÍTICA DE INTENSIDADE (REGRA ELIMINATÓRIA)]\n");
+        sb.append("📊 Métricas: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append((int)metrics.fcMedia()).append(" min | FC Max: ").append((int)metrics.fcMax())
                 .append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante())
-                .append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ")
-                .append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
+                .append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
+        sb.append("\n📊 Histórico Médio (Últimos 10 treinos):\n[Transcreva aqui os dados do bloco 'CONTEXTO HISTÓRICO' em formato de lista, como VO2 Médio, FC Média, etc.]\n\n");
 
-        sb.append("🩺 DIAGNÓSTICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n")
-                .append("[Transcreva aqui o texto do campo 'Diagnóstico Clínico-Esportivo da IA' da BASE de conhecimento para o cenário identificado, dirigindo-se amigavelmente a ").append(nomeAtleta).append("]\n\n")
+        sb.append("📋 Referência (Treino Anterior Prescrito):\n[Se houver dados no bloco 'REFERÊNCIA DO TREINO ANTERIOR PRESCRITO', transcreva-os aqui de forma resumida, incluindo Data, Duração e Foco.]\n\n");
+        sb.append("🩺 DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n")
+                .append("\n - [Com base no 'Tipo de Intensidade Detectado' fornecido, busque o cenário correspondente na 'MATRIZ DE DECISÃO' do arquivo 'studySettings.txt' e transcreva integralmente o seu respectivo campo 'Diagnóstico Clínico-Esportivo da IA', adaptando o tratamento para falar de forma amigável e direta com ").append(nomeAtleta).append("]\n\n")
 
-                .append("ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n")
-                .append("[Análise técnica sucinta correlacionando fcMedia, Pace, Altimetria e o cálculo final de efficiencyIndex. ")
+                .append("\n - ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n")
+                .append("\n Transcreva apenas a Legenda identificada correspondente a [Classificação de Intensidade]: Índice de Eficiência Aeróbica do arquivo studySettings no tópico: MATRIZ DE DECISÃO: CENÁRIOS DE COMPARAÇÃO PARA PROCESSAMENTO DA IA\n. ")
+                .append("\n  - [STATUS DO TREINO: CUMPRIDO]: Se o atleta executou o tipo de treino correto, respeitou as zonas cardíacas/alvos de ritmo e manteve o tempo de treino dentro de uma margem de tolerância de +/- 10% da duração prescrita.\n")
+                .append("\n  - [STATUS DO TREINO:CUMPRIDO PARCIALMENTE]: Se o atleta respeitou o tipo de treino e a intensidade (faixa cardíaca/tiros), mas divergiu na duração por uma margem maior que 10% (abaixo ou acima do volume planejado).\n")
+                .append("\n  - [STATUS DO TREINO:NÃO CUMPRIDO]: Se o atleta ignorou completamente a estrutura prescrita (ex: executou uma rodagem contínua em um dia agendado para treinos de tiro, ou treinou em zonas de estresse glicolítico quando a orientação era regenerativa).\n")
+                .append("\n  Insira essa classificação de cumprimento de forma clara, justificando fisiologicamente as razões do enquadramento.]\n\n")
+                .append("[Análise técnica sucinta correlacionando e analisando as interações entre a zonaPredominante, fcMedia, Pace, Altimetria, efficiencyIndex com o [STATUS DO TREINO]. ")
                 .append("Consulte no arquivo studySettings especificamente o tópico '🏷️ Legenda: Índice de Eficiência Aeróbica' para classificar a qualidade e o status do treino em relação à eficiência. ")
-                .append("Transcreva a Legenda apropriada: Índice de Eficiência Aeróbica do arquivo studySettings. ")
                 .append("O motor Java fornecerá os dados do treino agendado na tabela 'workout_prescriptions' para a mesma data. ")
-                .append("Compare rigidamente o treino executado com o prescrito e classifique o status de cumprimento sob os seguintes critérios técnicos:\n")
-                .append("  - [CUMPRIDO]: Se o atleta executou o tipo de treino correto, respeitou as zonas cardíacas/alvos de ritmo e manteve o tempo de treino dentro de uma margem de tolerância de +/- 10% da duração prescrita.\n")
-                .append("  - [CUMPRIDO PARCIALMENTE]: Se o atleta respeitou o tipo de treino e a intensidade (faixa cardíaca/tiros), mas divergiu na duração por uma margem maior que 10% (abaixo ou acima do volume planejado).\n")
-                .append("  - [NÃO CUMPRIDO]: Se o atleta ignorou completamente a estrutura prescrita (ex: executou uma rodagem contínua em um dia agendado para treinos de tiro, ou treinou em zonas de estresse glicolítico quando a orientação era regenerativa).\n")
-                .append("Insira essa classificação de cumprimento de forma clara logo no início do diagnóstico técnico, justificando fisiologicamente as razões do enquadramento.]\n\n");
+                .append("Compare rigidamente o treino executado com o prescrito e classifique o status de cumprimento sob os seguintes critérios técnicos:\n");
 
         sb.append("🏃\u200D♂️ CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n")
                 .append("[Explique para ").append(nomeAtleta).append(" o impacto na saúde mitocondrial, diferenciando os benefícios conforme o estímulo dado: Alta Intensidade (sinalização hormética e potência) ou Baixa Intensidade (biogênese mitocondrial e eficiência oxidativa). Use as metáforas contidas no estudo e dê um conselho prático final personalizado para ele].\n\n");
@@ -368,36 +387,31 @@ public class InsightService {
 
         sb.append("--- PRESCRIÇÃO STRAFIT PREDICT ---\n");
         sb.append("DATA PROGRAMADA: ").append(proximoTreinoData).append("\n\n")
-                .append("DIRETRIZES OBRIGATÓRIAS DE PRESCRIÇÃO (ESTRITAMENTE VINCULADAS AO CALENDÁRIO):\n")
-                .append("1. REGRA DE OURO (SOBREPÕE QUALQUER ESTUDO): Identifique o dia da semana em 'DATA PROGRAMADA' e ignore outras sugestões de intensidade se o dia não permitir:\n")
+                .append("DIRETRIZES OBRIGATÓRIAS DE PRESCRIÇÃO (CONSULTAR MATRIZ DE CONHECIMENTO INCLUÍDA NO ARQUIVO STUDYSETTINGS):\n")
+                .append("1. REGRA DE OURO DO CALENDÁRIO: Identifique o dia da semana em 'DATA PROGRAMADA' e prescreva estritamente o tipo de treino correspondente, cruzando com os conceitos do arquivo 'studySettings':\n\n")
+
                 .append("   - Se 'DATA PROGRAMADA' for SÁBADO:\n")
-                .append("     1. Prescreva OBRIGATORIAMENTE um TREINO LONGO focado em Volume Puro e Eficiência Mitocondrial (Zona 2: 124 a 138 bpm).\n")
-                .append("     2. É terminantemente PROIBIDO prescrever tiros, HIIT ou qualquer alta intensidade (Zona 3/4/5) aos sábados ou terças-feiras.\n")
-                .append("     3. Para calibrar a DURAÇÃO e o RITMO do sábado, a IA deve avaliar os últimos 10 treinos do histórico do usuário:\n")
-                .append("        - Se o histórico recente indicar boa Economia de Corrida (Índice de Eficiência frequentemente estável entre 1.00 e 1.05):\n")
-                .append("          Prescreva um volume expandido de suporte estrutural (Duração: 75 a 90 minutos) mantendo o ritmo de rodagem de base estável do usuário.\n")
-                .append("        - Se o histórico recente mostrar Fadiga Residual, Deriva Cardíaca (Cenário 4) ou Eficiência Baixa (< 1.00):\n")
-                .append("          Ajuste a recomendação preditiva para uma Rodagem Longa Regenerativa ou estabilizadora (Duração: 60 a 75 minutos), justificando a necessidade de 'recalibrar' o coração em baixa rotação.\n")
-                .append("     4. Justifique ao usuário com base no Estudo de Seiler (2010): explique que o volume acumulado em baixa intensidade no sábado atua como suporte para o sistema nervoso autônomo, melhorando a economia de corrida e permitindo suportar a carga dos treinos de tiro da semana sem risco de overtraining.\n\n")
+                .append("     1. Prescreva OBRIGATORIAMENTE um TREINO LONGO focado em Volume Puro e Eficiência Mitocondrial na Zona 2 (124 a 138 bpm).\n")
+                .append("     2. É terminantemente PROIBIDO prescrever tiros, HIIT ou alta intensidade (Zonas 3/4/5) aos sábados ou terças-feiras.\n")
+                .append("     3. DURAÇÃO E JUSTIFICATIVA: Avalie os últimos 10 treinos do histórico do usuário. Consulte a seção 'PARÂMETROS METABÓLICOS DE CLASSIFICAÇÃO PARA A IA (ZONA 2 VS OUTROS)' no arquivo 'studySettings' e as referências de Seiler (2010) para definir a duração ideal (Longo de suporte vs Longo regenerativo/estabilizador) e gerar a justificativa biológica de proteção do sistema autônomo com base no nível de fadiga ou economia de corrida do atleta.\n\n")
+
                 .append("   - Se 'DATA PROGRAMADA' for TERÇA-FEIRA:\n")
-                .append("     1. Prescreva um TREINO CURTO EM ZONA 2 (Manutenção/Regenerativo) com duração estrita de 40 a 50 minutos.\n")
-                .append("     2. Para calibrar a abordagem da terça, a IA deve avaliar o último Treino Longo (geralmente o de sábado):\n")
-                .append("        - Se o Treino de Sábado foi executado corretamente em Zona 2 (Eficiência Estável): Defina a terça como Manutenção Aeróbica Padrão (50 minutos) para clareamento de lactato basal.\n")
-                .append("        - Se o Treino de Sábado foi classificado como CENÁRIO 2 (Zona Cinzenta) ou CENÁRIO 3 (Sobrecarga Glicolítica): A IA deve identificar fadiga residual desproporcional, acúmulo ineficiente de lactato e quebra da polarização. Reduza a terça para o mínimo Regenerativo (40 minutos).\n")
-                .append("     3. Justificativa Crítica ao Usuário para o Cenário de Sobrecarga: Alerte o atleta explicitamente que o corpo acumulou estresse ácido desnecessário no final de semana e que o coração precisa ser 'recalibrado' em baixa rotação (Z2 estrita: 124 a 138 bpm) para recuperar a flexibilidade metabólica e limpar os radicais livres antes de qualquer estímulo de velocidade subsequente.\n\n")
-                .append("   - Se 'DATA PROGRAMADA' for QUINTA-FEIRA: Prescreva um TREINO DE INTENSIDADE (TIROS/HIIT).\n\n")
-                .append("2. SELEÇÃO DE NÍVEL (Apenas para Quintas): Consulte a MATRIZ DE PROGRESSÃO DE INTENSIDADE no arquivo studySettings. ")
-                .append("### REGRA DE ENQUADRAMENTO DA MATRIZ HIIT (VIA NOX2):\n")
-                .append("1. Avalie os últimos 10 treinos do usuário buscando sessões classificadas como 'CENÁRIO 5' (Alta Intensidade/Tiros).\n")
-                .append("2. Se NÃO houver registro de tiros ou se o último treino de tiro foi há mais de 14 dias, selecione OBRIGATORIAMENTE o 'NÍVEL 1: ADAPTAÇÃO'.\n")
-                .append("3. Se houver histórico recente de tiros, verifique o 'efficiency_index' e a consistência das zonas: se o índice estiver estável (>= 0.95), progrida estritamente de forma gradual para o próximo Nível subsequente (Nível 2, depois 3), nunca pulando níveis, para garantir a sinalização hormética segura e adaptação da via NOX2 sem risco de overtraining.\n")
-                .append("### REGRA DE CÁLCULO DE RITMO ALVO (PACE DOS TIROS):\n")
-                .append("1. Calcule a média aritmética exata do 'Pace Médio de Corrida' dos últimos 10 treinos fornecidos pelo motor (esta será a Linha de Base do usuário).\n")
-                .append("2. O Pace Alvo prescrito para os tiros de alta intensidade DEVE ser matematicamente e significativamente mais rápido que essa Linha de Base, aplicando as seguintes frações de ganho conforme o tempo do tiro:\n")
-                .append("   - Para Tiros de 1 min (Nível 1): O pace alvo deve ser entre 30 a 45 segundos por km MAIS RÁPIDO que o Pace Médio dos 10 treinos.\n")
-                .append("   - Para Tiros de 2 min (Nível 2): O pace alvo deve ser entre 20 a 30 segundos por km MAIS RÁPIDO que o Pace Médio dos 10 treinos.\n")
-                .append("   - Para Tiros de 3 a 4 min (Nível 3): O pace alvo deve ser entre 10 a 15 segundos por km MAIS RÁPIDO que o Pace Médio dos 10 treinos.\n")
-                .append("3. Expresse o ritmo resultante estritamente no formato de pace de corrida (ex: 'Buscar ritmo alvo entre 5:15/km e 5:30/km') e correlacione com a faixa cardíaca estipulada para o nível.\n\n")                .append("3. FORMATO VISUAL OBRIGATÓRIO (PARA O USUÁRIO):\n")
+                .append("     1. Prescreva um TREINO CURTO OU MÉDIO EM ZONA 2 (Manutenção/Regenerativo) com foco estrito em clareamento de lactato basal (124 a 138 bpm).\n")
+                .append("     2. CALIBRAÇÃO DA ABORDAGEM: Avalie o último Treino Longo executado pelo usuário. Se houver desvio de zona (Zona Cinzenta / Sobrecarga Glicolítica), consulte o arquivo 'studySettings' para identificar a fadiga residual e a quebra da polarização metabólica. Reduza o tempo para o patamar mínimo de recuperação, justificando a necessidade de 'recalibrar' o coração e restaurar a flexibilidade metabólica.\n\n")
+
+                .append("   - Se 'DATA PROGRAMADA' for QUINTA-FEIRA:\n")
+                .append("     1. Prescreva OBRIGATORIAMENTE um TREINO DE INTENSIDADE (TIROS/HIIT).\n\n")
+
+                .append("2. SELEÇÃO DE NÍVEL E PROGRESSÃO (Apenas para Quintas-Feiras):\n")
+                .append("   - Consulte ativamente a 'MATRIZ DE PROGRESSÃO DE INTENSIDADE' e as 'REGRAS DE ENQUADRAMENTO DA MATRIZ HIIT (VIA NOX2)' contidas no arquivo 'studySettings'.\n")
+                .append("   - Avalie o histórico recente de tiros do usuário nos últimos 10 treinos e use estritamente os critérios do arquivo para determinar se o atleta deve iniciar no 'NÍVEL 1: ADAPTAÇÃO' ou progredir gradualmente para os níveis seguintes (Nível 2 ou 3) com base na estabilidade do 'efficiency_index' (>= 0.95), garantindo a sinalização hormética segura sem risco de overtraining.\n\n")
+
+                .append("3. CÁLCULO DE RITMO ALVO (PACE DOS TIROS):\n")
+                .append("   - Determine a Linha de Base calculando a média aritmética exata do 'Pace Médio de Corrida' dos últimos 10 treinos do usuário.\n")
+                .append("   - O Pace Alvo dos tiros DEVE ser significativamente mais rápido que a Linha de Base. Aplique estritamente as frações de ganho de tempo por quilômetro especificadas para cada nível na tabela de intensidade do arquivo 'studySettings' (ex: mais rápido para tiros curtos de 1 min, ajustado para tiros mais longos).\n")
+                .append("   - Expresse o ritmo final estritamente no formato de pace de corrida (ex: 'Buscar ritmo alvo entre 5:15/km e 5:30/km') e amarre com a faixa cardíaca estipulada para o nível correspondente no arquivo.\n\n")
+
+                .append("4. FORMATO VISUAL OBRIGATÓRIO (PARA O USUÁRIO):\n")
                 .append("Apresente a prescrição obrigatoriamente neste formato de lista antes de qualquer outro texto:\n")
                 .append("PRESCRICÃO DE TREINO:\n")
                 .append("Tipo: [Tipo do treino]\n")
@@ -496,10 +510,29 @@ public class InsightService {
         return null;
     }
 
-    private String determineWorkoutIntensityType(double stdDev, double fcMaxPercentage) {
-        if (stdDev > 8.0 && fcMaxPercentage > 90.0) {
-            return "ALTA_INTENSIDADE (Intervalado/Picos)";
-        } else if (stdDev > 5.0 && fcMaxPercentage > 80.0) {
+    private String detectarPadraoDeTreino(List<StravaActivity.MinuteAnalysis> analysis, SessionMetrics metrics) {
+        final int MIN_PICOS_PARA_INTERVALADO = 4;
+        final double PICO_THRESHOLD_BPM = 15.0; // BPM acima da média para ser considerado um pico
+
+        int picosDetectados = 0;
+        boolean emPico = false;
+
+        for (StravaActivity.MinuteAnalysis minuto : analysis) {
+            Double hr = minuto.getAverageHeartRate();
+            if (hr == null) continue;
+
+            if (hr > metrics.fcMedia() + PICO_THRESHOLD_BPM && !emPico) {
+                emPico = true;
+                picosDetectados++;
+            } else if (hr < metrics.fcMedia() + (PICO_THRESHOLD_BPM / 2) && emPico) {
+                // Considera que saiu do pico se a FC cair para menos da metade do threshold
+                emPico = false;
+            }
+        }
+
+        if (picosDetectados >= MIN_PICOS_PARA_INTERVALADO) {
+            return "ALTA_INTENSIDADE (Intervalado)";
+        } else if (metrics.stdDev() > 7.0 && metrics.fcMaxPercentage() > 85.0) { // Ajustado para ser mais seletivo
             return "MÉDIA_INTENSIDADE (Tempo Run/Fartlek)";
         }
         return "BAIXA_INTENSIDADE (Contínuo/Zona 2)";

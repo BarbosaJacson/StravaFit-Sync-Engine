@@ -47,8 +47,8 @@ MODELO TRIDIMENSIONAL DE INTENSIDADE DE SEILER:
 🏷️ Legenda:  
 🔴 < 1,00 | Regular (Abaixo da Média): Indica que o custo cardiovascular foi proporcionalmente alto para o ritmo desenvolvido. Comum em treinos longos com muita fadiga acumulada, dias de calor intenso ou treinos de tiros muito fortes.  
 🟡 1,00 a 1,05 | Bom / Estável: É o seu padrão muito bem consolidado para treinos longos e rodagens constantes de 10 km a 16 km. Mostra uma base aeróbica sólida e saudável.  
-🟢 1,06 a 1,10 | Ótimo / Eficiente: Indica excelente economia de corrida. O seu coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo de corrida mais rápido, muito comum nos seus treinos de 8 km.  
-🔵 > 1,10 | Excelente / Altamente Otimizado: Seu pico máximo de eficiência mecânica e cardiovascular. O corpo gastou o mínimo de energia possível para entregar a maior velocidade da planilha.  
+🔵 1,06 a 1,10 | Ótimo / Eficiente: Indica excelente economia de corrida. O seu coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo de corrida mais rápido, muito comum nos seus treinos de 8 km.  
+🟢> 1,10 | Excelente / Altamente Otimizado: Seu pico máximo de eficiência mecânica e cardiovascular. O corpo gastou o mínimo de energia possível para entregar a maior velocidade da planilha.  
 --------------------------------------------------------------------------------
 
 DIRETRIZES GERAIS DE RECOMENDAÇÃO PRÁTICA (O QUE A IA DEVE INDICAR AO USUÁRIO DO STRAVA):
@@ -64,8 +64,51 @@ TABELA DE PREMISSAS METABÓLICAS (LIMITES DE CORTE DO MOTOR):
 - Zona 3/4 (Estresse Glicolítico): 80% a 89% da FCR -> 148 a 159 bpm [Lactato >2.5 mM]
 - Zona 5 (Capacidade Máxima / VO2): Acima de 90% da FCR -> Acima de 160 bpm
 --------------------------------------------------------------------------------
+MATRIZ DE DECISÃO: CENÁRIOS DE COMPARAÇÃO PARA PROCESSAMENTO DA IA
+--------------------------------------------------------------------------------
 
+CENÁRIO 1: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX) - (Curto Semanal para terças - feira)
+- Gatilho do Strava: Tempo de treino >= 30 e <= 50 min considerado treino curto semanal, com Frequência Cardíaca Média mantida estritamente entre 124 e 138 bpm. Desvio padrão da FC baixo (estabilidade de ritmo).
+- Diagnóstico Clínico-Esportivo da IA: "Execução perfeita alinhada a San-Millán & Brooks (2017). Sua intensidade de esforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM). Esse estresse volumétrico controlado ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial (nascimento de novas mitocôndrias nas fibras musculares Tipo I). Sob a ótica de Stephen Seiler (2010), este treino consolida a Zona 2 de baixa intensidade (entre ~50% a 75% do VO₂ máx), que deve compor 80% do volume total de um atleta para construir a base cardiovascular necessária que sustentará a evolução do VO₂ máx a longo prazo sem gerar overtraining.Sua flexibilidade metabólica crônica foi aprimorada."
+
+CENÁRIO 2: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX) - (Longo Semanal para os sábados)
+- Gatilho do Strava: Tempo de treino >= 50 min com limite a ser avaliado pela IA se baseando no histórico do atleta, considerado treino longo semanal, com Frequência Cardíaca Média mantida estritamente entre 124 e 138 bpm. Desvio padrão da FC baixo (estabilidade de ritmo).
+- Diagnóstico Clínico-Esportivo da IA: "Execução perfeita alinhada a San-Millán & Brooks (2017). Sua intensidade de esforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM). Esse estresse volumétrico controlado ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial (nascimento de novas mitocôndrias nas fibras musculares Tipo I). Sob a ótica de Stephen Seiler (2010), este treino consolida a Zona 2 de baixa intensidade (entre ~50% a 75% do VO₂ máx), que deve compor 80% do volume total de um atleta para construir a base cardiovascular necessária que sustentará a evolução do VO₂ máx a longo prazo sem gerar overtraining.Sua flexibilidade metabólica crônica foi aprimorada."
+
+
+CENÁRIO 3: DESVIO PARA A ZONA CINZENTA - ZONA 3 PREDOMINANTE  
+(ESTRESSE METABÓLICO SILENCIOSO)
+- Gatilho do Strava: Tempo de treino >= 45 min E Frequência Cardíaca Média mantida entre 140 e 147 bpm.
+- Diagnóstico Clínico-Esportivo da IA: "O treino invadiu o 'Ponto de Cruzamento' (Cross-over Point) metabólico. Nessa faixa cardíaca (140-147 bpm), a depuração de lactato pelas suas mitocôndrias é sobrecarregada, atingindo a barreira crítica de 2.0 mM. Conforme demonstrado por San-Millán, o acúmulo de lactato inibe diretamente o transporte de ácidos graxos para a matriz mitocondrial. De acordo com o modelo de Stephen Seiler (2010), o esforço entrou na Zona 2 de Limiar (~75% a 85% do VO₂ máx), uma faixa de transição estressante que, se usada em excesso nas rodagens, gera um cansaço residual que sabota os dias de tiro, impedindo a expansão real do seu teto de VO₂ máx. Embora você tenha gerado ganho cardiovascular, a taxa de queima de gordura caiu drasticamente, forçando o corpo a depender de carboidratos e gerando fadiga residual desnecessária para uma rodagem de base."
+
+CENÁRIO 4: SOBRECARGA GLICOLÍTICA - ZONA 3 e 4 PREDOMINANTE  
+(BLOQUEIO DE SINALIZAÇÃO AERÓBICA)
+- Gatilho do Strava: Tempo de treino >= 30 min E Frequência Cardíaca Média acima de 148 bpm (predominância em Z3/Z4).
+- Diagnóstico Clínico-Esportivo da IA: "Atenção: O treino gerou um estresse glicolítico severo e sustentado. Com os batimentos acima de 148 bpm, os níveis estimados de lactato ultrapassaram os 2.5 mM, ativando um estado de acidose muscular aguda. Sob a ótica molecular de Casanova et al. (2023), este nível de estresse ativa vias associadas ao mTOR de forma crônica e eleva o estresse oxidativo (ROS) além do limite de recuperação saudável. Conforme os achados de Stephen Seiler (2010), o esforço contínuo nesta faixa ultrapassa o limiar ventilatório, acumulando mais de 4 mM de lactato; treinar de forma sustentada aqui falha em gerar os estímulos hormonais agudos necessários para elevar o VO₂ máx, atuando apenas como um dreno de energia e desgaste celular. Esse padrão inibe a sinalização para o desenvolvimento de mitocôndrias de contração lenta, reduzindo a sua capacidade de queimar gordura no longo prazo."
+
+CENÁRIO 5: DERIVA CARDÍACA OU CANSAÇO ACUMULADO 
+(SINAL DE INFLEXIBILIDADE)
+- Gatilho do Strava: Primeiro terço do treino em Zona 2 (124-138 bpm), mas os dois terços finais sustentados na Zona Cinzenta (140-147 bpm), SEM que tenha ocorrido aumento real no ritmo de corrida (pace).
+- Diagnóstico Clínico-Esportivo da IA: "Detectada Deriva Cardíaca (Cardiovascular Drift) precoce. Você iniciou o treino na zona metabólica ideal (FATmax), mas o seu coração precisou subir de rotação para manter o mesmo ritmo de corrida. O estudo de San-Millán explica que isso ocorre por duas razões: ou há uma desidratação/fadiga cardiovascular acumulada, ou suas mitocôndrias esgotaram rapidamente a capacidade de clarear o lactato inicial, forçando o recrutamento de fibras glicolíticas mais cedo. Sob a análise de Stephen Seiler (2010), essa transição involuntária da Zona 1 para a Zona 2 de esforço reduz drasticamente o tempo útil de treino regenerativo e sinaliza que a fadiga interna está diminuindo a sua economia de corrida, reduzindo a fração de VO₂ máx que você consegue sustentar de forma estável. Monitore o seu descanso e hidratação antes das próximas rodagens."
+
+CENÁRIO 6: ESTÍMULO DE ALTA INTENSIDADE E TIROS - (DESCONSIDERE A ZONA PREDOMINANTE E IDENTIFIQUE PICOS INTERVALADOS)  
+(ESTRESSE HORMÉTICO SELETIVO)
+- Gatilho do Strava: Treino estruturado em blocos (frequentes oscilações de ritmo). Frequência Cardíaca atingindo picos na Zona 3/4/5 (acima de 148 bpm) intervalados com quedas bruscas para Zona 1/Recovery.
+REGRA CRÍTICA DE ANÁLISE: Treino estruturado em blocos (frequentes oscilações de ritmo). IGNORE A FREQUÊNCIA CARDÍACA MÉDIA GERAL, POIS ELA É DILUÍDA PELOS PERÍODOS DE RECUPERAÇÃO. A IA deve varrer a série temporal minuto a minuto procurando por um padrão clássico de TREINO INTERVALADO (TIROS):
+  1. Presença de picos repetidos de Frequência Cardíaca na Zona 3/4/5 (acima de 148 bpm), associados a um aumento abrupto de velocidade (ritmo/pace significativamente mais rápido).
+  2. Intercalação obrigatória com quedas bruscas de Frequência Cardíaca para a Zona 1/Recuperação (abaixo de 138 bpm, idealmente entre 112 e 122 bpm) e redução drástica no ritmo (caminhada ou trote leve) caracterizando o período de RECOVERY.
+  3. Se houver pelo menos 3 ou mais dessas oscilações cíclicas (Pico de Esforço -> Queda de Recuperação) na série temporal, classifique OBRIGATORIAMENTE o treino neste cenário, mesmo que a FC Média total da sessão tenha ficado abaixo de 145 bpm.
+- Diagnóstico Clínico-Esportivo da IA: "Treino de alta intensidade processado com foco em Mitohormese (Casanova et al., 2023). Os picos acima de 155 bpm geraram uma depleção severa de ATP celular e uma avalanche controlada de lactato. Quando o estressor é agudo e intercalado (tiros), ele funciona como um sinalizador hormético poderoso: força as mitocôndrias existentes a se tornarem mais eficientes no clareamento rápido de lactato durante as pausas. Este treino representa perfeitamente a Zona 3 de Stephen Seiler (2010), com estímulos executados acima de 85% a 90% do VO₂ máx[cite: 1]. Seiler comprova que essa alta intensidade controlada é o único gatilho capaz de recrutar o sistema de forma agressiva o suficiente para expandir o teto de captação e consumo máximo de oxigênio (VO₂ máx) do corredor[cite: 1]. É o complemento ideal para a sua base, desde que seguido por um dia de recuperação ativa ou descanso[cite: 1]."
+
+CENÁRIO 7: DURAÇÃO INSUFICIENTE 
+(FALTA DE SINALIZAÇÃO AGUDA)
+- Gatilho do Strava: Tempo de treino total < 30 min, ou seja, insuficiente mesmo a Frequência Cardíaca ter ficado na Zona 2 (124-138 bpm).
+- Diagnóstico Clínico-Esportivo da IA: "Treino seguro, porém sub-limiar para adaptação mitocondrial profunda. Embora você tenha mantido os batimentos cardíacos na zona correta de oxidação de gordura, o tempo de estímulo foi inferior a 30 minutos. Os mecanismos de sinalização celular para biogênese e expressão das proteínas transportadoras de lactato (MCT-1) necessitam de uma demanda volumétrica contínua para consolidar as alterações genéticas na célula. Na perspectiva de Stephen Seiler (2010), treinos de baixa intensidade exigem uma duração expandida (estresse por volume) para gerar adaptações cardíacas estruturais. Embora excelente para recuperação, o estímulo foi curto demais para sinalizar ao organismo o estresse crônico necessário para construir a base do seu VO₂ máx. Considere estender suas rodagens de Zona 2 para além de 45 a 60 minutos para colher os benefícios dos estudos de San-Millán."
+
+--------------------------------------------------------------------------------
 DIRETRIZES DE RECOMENDAÇÃO PREDITIVA (PRESCRIÇÃO DO PRÓXIMO TREINO):
+--------------------------------------------------------------------------------
+
 Base Fisiológica: Modelo Polarizado 80/20 (Stephen Seiler, 2010). A IA deve avaliar o impacto do TREINO ATUAL e, obrigatoriamente, sugerir a abordagem ideal para a PRÓXIMA sessão com base nas regras de alternância abaixo:
 Premissa: Treinos de intensidade só deverão ser programados para dias de quinta feira.
 1. Se o Treino Atual foi Classificado como CENÁRIO 1 (FATmax / Zona 2):
@@ -73,17 +116,17 @@ Premissa: Treinos de intensidade só deverão ser programados para dias de quint
    - Recomendação de Próximo Treino: Sugerir um estímulo de Alta Intensidade / Tiros (Zona 3 de Seiler / Cenário 5). 
    - Justificativa ao usuário: Explicar que, com as "fábricas de energia" (mitocôndrias) descansadas e a economia de corrida fortalecida pelo volume, o corpo está pronto para desafiar o teto do VO2 máx com tiros intervalados sem risco de lesão ou overtraining.
 
-2. Se o Treino Atual foi Classificado como CENÁRIO 5 (Alta Intensidade / Tiros):
+2. Se o Treino Atual foi Classificado como CENÁRIO 6 (Alta Intensidade / Tiros):
    - Ação da IA: Identificar o esgotamento agudo de ATP, acúmulo de radicais livres (ROS) e estresse hormético severo.
-   - Recomendação de Próximo Treino: Sugerir obrigatoriamente uma Rodagem Leve Regenerativa ou Volume Puro em Zona 2 (Cenário 1).
+   - Recomendação de Próximo Treino: Sugerir obrigatoriamente uma Rodagem Longa com Volume maior em Zona 2 (Cenário 2).
    - Justificativa ao usuário: Explicar que as proteínas de sinalização celular (como PGC-1alpha) e a mitofagia precisam de um ambiente de baixa acidez e fluxo sanguíneo constante (Zona 2) para consolidar a biogênese e limpar o lixo celular gerado pelos tiros.
 
-3. Se o Treino Atual foi Classificado como CENÁRIO 2 (Zona Cinzenta) ou CENÁRIO 3 (Sobrecarga Glicolítica):
+3. Se o Treino Atual foi Classificado como CENÁRIO 3 (Zona Cinzenta) ou CENÁRIO 4 (Sobrecarga Glicolítica):
    - Ação da IA: Identificar fadiga residual desproporcional, acúmulo ineficiente de lactato e quebra da polarização.
    - Recomendação de Próximo Treino: Prescrever um treino estritamente Regenerativo/Zona 2 de curta a média duração.
    - Justificativa ao usuário: Alertar que o corpo acumulou estresse ácido desnecessário e que o coração precisa ser "recalibrado" em baixa rotação para recuperar a flexibilidade metabólica antes de qualquer estímulo de velocidade.
 
-4. Se o Treino Atual foi Classificado como CENÁRIO 4 (Deriva Cardíaca) ou CENÁRIO 6 (Duração Insuficiente):
+4. Se o Treino Atual foi Classificado como CENÁRIO 5 (Deriva Cardíaca) ou CENÁRIO 7 (Duração Insuficiente):
    - Ação da IA: Identificar falta de suporte volumétrico ou cansaço acumulado de dias anteriores.
    - Recomendação de Próximo Treino: Prescrever Descanso Total ou uma Rodagem Curta e leve em Zona 2, priorizando hidratação.
    - Justificativa ao usuário: Explicar que o motor cardiovascular deu sinais de alerta (deriva) ou sub-estímulo, sendo necessário estabilizar a base antes de avançar na intensidade.
@@ -140,36 +183,6 @@ NÍVEL 4: CAPACIDADE GLICOLÍTICA EXTREMA (SARGENTO HORMÉTICO)
 - Intensidade: Rotação máxima do motor (BPM > 162 bpm).
 - Recuperação: 1 minuto de caminhada (recuperação incompleta para forçar o músculo a trabalhar sob forte acidose).
 - Desaquecimento: 8 minutos de caminhada livre.
---------------------------------------------------------------------------------
---------------------------------------------------------------------------------
-MATRIZ DE DECISÃO: CENÁRIOS DE COMPARAÇÃO PARA PROCESSAMENTO DA IA
---------------------------------------------------------------------------------
-
-CENÁRIO 1: EFICIÊNCIA METABÓLICA (FATMAX)
-- Gatilho do Strava: Tempo de treino >= 45 min E Frequência Cardíaca Média mantida estritamente entre 124 e 138 bpm. Desvio padrão da FC baixo (estabilidade de ritmo).
-- Diagnóstico Clínico-Esportivo da IA: "Execução perfeita alinhada a San-Millán & Brooks (2017). Sua intensidade de esforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM). Esse estresse volumétrico controlado ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial (nascimento de novas mitocôndrias nas fibras musculares Tipo I). Sob a ótica de Stephen Seiler (2010), este treino consolida a Zona 1 de baixa intensidade (entre ~50% a 75% do VO₂ máx), que deve compor 80% do volume total de um atleta para construir a base cardiovascular necessária que sustentará a evolução do VO₂ máx a longo prazo sem gerar overtraining.Sua flexibilidade metabólica crônica foi aprimorada."
-
-CENÁRIO 2: DESVIO PARA A ZONA CINZENTA (ESTRESSE METABÓLICO SILENCIOSO)
-- Gatilho do Strava: Tempo de treino >= 45 min E Frequência Cardíaca Média mantida entre 140 e 147 bpm.
-- Diagnóstico Clínico-Esportivo da IA: "O treino invadiu o 'Ponto de Cruzamento' (Cross-over Point) metabólico. Nessa faixa cardíaca (140-147 bpm), a depuração de lactato pelas suas mitocôndrias é sobrecarregada, atingindo a barreira crítica de 2.0 mM. Conforme demonstrado por San-Millán, o acúmulo de lactato inibe diretamente o transporte de ácidos graxos para a matriz mitocondrial. De acordo com o modelo de Stephen Seiler (2010), o esforço entrou na Zona 2 de Limiar (~75% a 85% do VO₂ máx), uma faixa de transição estressante que, se usada em excesso nas rodagens, gera um cansaço residual que sabota os dias de tiro, impedindo a expansão real do seu teto de VO₂ máx. Embora você tenha gerado ganho cardiovascular, a taxa de queima de gordura caiu drasticamente, forçando o corpo a depender de carboidratos e gerando fadiga residual desnecessária para uma rodagem de base."
-
-CENÁRIO 3: SOBRECARGA GLICOLÍTICA (BLOQUEIO DE SINALIZAÇÃO AERÓBICA)
-- Gatilho do Strava: Tempo de treino >= 30 min E Frequência Cardíaca Média acima de 148 bpm (predominância em Z3/Z4).
-- Diagnóstico Clínico-Esportivo da IA: "Atenção: O treino gerou um estresse glicolítico severo e sustentado. Com os batimentos acima de 148 bpm, os níveis estimados de lactato ultrapassaram os 2.5 mM, ativando um estado de acidose muscular aguda. Sob a ótica molecular de Casanova et al. (2023), este nível de estresse ativa vias associadas ao mTOR de forma crônica e eleva o estresse oxidativo (ROS) além do limite de recuperação saudável. Conforme os achados de Stephen Seiler (2010), o esforço contínuo nesta faixa ultrapassa o limiar ventilatório, acumulando mais de 4 mM de lactato; treinar de forma sustentada aqui falha em gerar os estímulos hormonais agudos necessários para elevar o VO₂ máx, atuando apenas como um dreno de energia e desgaste celular. Esse padrão inibe a sinalização para o desenvolvimento de mitocôndrias de contração lenta, reduzindo a sua capacidade de queimar gordura no longo prazo."
-
-CENÁRIO 4: DERIVA CARDÍACA OU CANSAÇO ACUMULADO (SINAL DE INFLEXIBILIDADE)
-- Gatilho do Strava: Primeiro terço do treino em Zona 2 (124-138 bpm), mas os dois terços finais sustentados na Zona Cinzenta (140-147 bpm), SEM que tenha ocorrido aumento real no ritmo de corrida (pace).
-- Diagnóstico Clínico-Esportivo da IA: "Detectada Deriva Cardíaca (Cardiovascular Drift) precoce. Você iniciou o treino na zona metabólica ideal (FATmax), mas o seu coração precisou subir de rotação para manter o mesmo ritmo de corrida. O estudo de San-Millán explica que isso ocorre por duas razões: ou há uma desidratação/fadiga cardiovascular acumulada, ou suas mitocôndrias esgotaram rapidamente a capacidade de clarear o lactato inicial, forçando o recrutamento de fibras glicolíticas mais cedo. Sob a análise de Stephen Seiler (2010), essa transição involuntária da Zona 1 para a Zona 2 de esforço reduz drasticamente o tempo útil de treino regenerativo e sinaliza que a fadiga interna está diminuindo a sua economia de corrida, reduzindo a fração de VO₂ máx que você consegue sustentar de forma estável. Monitore o seu descanso e hidratação antes das próximas rodagens."
-
-CENÁRIO 5: ESTÍMULO DE ALTA INTENSIDADE E TIROS (ESTRESSE HORMÉTICO SELETIVO)
-- Gatilho do Strava: Treino estruturado em blocos (frequentes oscilações de ritmo). Frequência Cardíaca atingindo picos na Zona 4/5 (acima de 155 bpm) intercalados com quedas bruscas para Zona 1/Recuperação.
-- Diagnóstico Clínico-Esportivo da IA: "Treino de alta intensidade processado com foco em Mitohormese (Casanova et al., 2023). Os picos acima de 155 bpm geraram uma depleção severa de ATP celular e uma avalanche controlada de lactato. Quando o estressor é agudo e intercalado (tiros), ele funciona como um sinalizador hormético poderoso: força as mitocôndrias existentes a se tornarem mais eficientes no clareamento rápido de lactato durante as pausas. Este treino representa perfeitamente a Zona 3 de Stephen Seiler (2010), com estímulos executados acima de 85% a 90% do VO₂ máx. Seiler comprova que essa alta intensidade controlada é o único gatilho capaz de recrutar o sistema de forma agressiva o suficiente para expandir o teto de captação e consumo máximo de oxigênio (VO₂ máx) do corredor. É o complemento ideal para a sua base, desde que seguido por um dia de recuperação ativa ou descanso."
-
-CENÁRIO 6: DURAÇÃO INSUFICIENTE (FALTA DE SINALIZAÇÃO AGUDA)
-- Gatilho do Strava: Tempo de treino total < 30 min, ou seja, insuficiente mesmo a Frequência Cardíaca ter ficado na Zona 2 (124-138 bpm).
-- Diagnóstico Clínico-Esportivo da IA: "Treino seguro, porém sub-limiar para adaptação mitocondrial profunda. Embora você tenha mantido os batimentos cardíacos na zona correta de oxidação de gordura, o tempo de estímulo foi inferior a 30 minutos. Os mecanismos de sinalização celular para biogênese e expressão das proteínas transportadoras de lactato (MCT-1) necessitam de uma demanda volumétrica contínua para consolidar as alterações genéticas na célula. Na perspectiva de Stephen Seiler (2010), treinos de baixa intensidade exigem uma duração expandida (estresse por volume) para gerar adaptações cardíacas estruturais. Embora excelente para recuperação, o estímulo foi curto demais para sinalizar ao organismo o estresse crônico necessário para construir a base do seu VO₂ máx. Considere estender suas rodagens de Zona 2 para além de 45 a 60 minutos para colher os benefícios dos estudos de San-Millán."
-
-
 =======================================================================
 DIRETRIZES - REPOSIÇÃO E DESCANSO PÓS-TREINO
 =======================================================================
