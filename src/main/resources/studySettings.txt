@@ -59,12 +59,12 @@ TABELA DE PREMISSAS METABÓLICAS (LIMITES DE CORTE DO MOTOR):
 --------------------------------------------------------------------------------------------------------------
 MATRIZ DE DECISÃO: CENÁRIOS DE COMPARAÇÃO PARA PROCESSAMENTO DA IA
 ---------------------------------------------------------------------------------------------------------------
-CENÁRIO 1: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX) - (Curto a Médio Semanal para terças-feiras)
+CENÁRIO 1: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX) 
 ---------------------------------------------------------------------------------------------------------------
 - Gatilho do Strava: Tempo de treino total enquadrado nas faixas de terça-feira (seja no patamar de Retenção de 45 a 60 min ou no patamar de Progressão de 65 a 75 min), com Frequência Cardíaca Média mantida rigidamente na Zona 2 (entre 124 e 138 bpm). Desvio padrão da FC baixo (estabilidade de ritmo).
 - Validação pelo Efficiency Index da Sessão: A IA deve ler o 'efficiency_index' gerado nesta sessão e avaliar o nível de adaptação cardiovascular do dia com os seguintes cortes:
 
-  ÍNDICE DE EFICIÊNCIA AERÓBICA 
+ÍNDICE DE EFICIÊNCIA AERÓBICA 
 🏷️ Legenda:  
   🔴 < 1,00 | Regular (Abaixo da Média): Indica que o custo cardiovascular foi proporcionalmente alto para a rodagem de terça-feira. Alerta para fadiga acumulada do final de semana, interferência climática ou ritmo excessivo que violou o propósito regenerativo do dia.
   🟡 1,00 a 1,05 | Bom / Estável: Mostra que o treino curto/médio cumpriu perfeitamente o papel homeostático na Zona 2. É o seu padrão consolidado de base aeróbica saudável, limpando resíduos sem agredir o organismo.
@@ -75,11 +75,14 @@ CENÁRIO 1: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX) - (Curto a 
 - Diagnóstico Clínico-Esportivo da IA: "Execução perfeita alinhada a San-Millán & Brooks (2017) e Stephen Seiler (2010). Sua intensidade de esforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM), mantendo os batimentos perfeitamente regulados na Zona 2 (124-138 bpm). A resposta do seu 'efficiency_index' nesta sessão valida o acerto do volume aplicado (seja na janela de retenção para consolidação capilar ou na progressão para expansão celular). Esse estresse volumétrico controlado ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial saudável nas fibras musculares Tipo I, otimizando a sua flexibilidade metabólica e garantindo a regeneração ideal para os estímulos de alta intensidade da semana."
 
 ---------------------------------------------------------------------------------------------------
-CENÁRIO 2: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX) - (Longo Semanal para os sábados)
+CENÁRIO 2: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX) 
 ---------------------------------------------------------------------------------------------------
-- Gatilho do Strava: Tempo de treino total enquadrado nas faixas de sábado (seja no patamar de Retenção de 60 a 75 min ou no patamar de Progressão de 80 a 85 min), com Frequência Cardíaca Média mantida rigidamente na Zona 2 (entre 124 e 138 bpm). Desvio padrão da FC baixo (estabilidade de ritmo).
+- Gatilho do Strava: Tempo de treino total enquadrado nas faixas de sábado (seja no patamar de Retenção de 61 a 75 min ou no patamar de Progressão de 80 a 85 min), com Frequência Cardíaca Média mantida rigidamente na Zona 2 (entre 124 e 138 bpm). Desvio padrão da FC baixo (estabilidade de ritmo).
 
 - Validação pelo Efficiency Index da Sessão (Conforme Legenda Geral): A IA deve ler o 'efficiency_index' gerado especificamente nesta sessão e correlacionar com os seguintes patamares de feedback:
+
+ÍNDICE DE EFICIÊNCIA AERÓBICA
+🏷️ Legenda:
   🔴 < 1,00 | Regular (Abaixo da Média): O diagnóstico deve alertar que o custo cardiovascular foi proporcionalmente alto para o volume desenvolvido, sinalizando fadiga severa acumulada, desidratação, efeito do calor ou que o ritmo degradou a economia de corrida no terço final.
   🟡 1,00 a 1,05 | Bom / Estável: O diagnóstico indica que a rodagem longa cumpriu seu papel com excelência, mantendo o padrão consolidado da sua base aeróbica saudável e estabilidade homeostática em regime de endurance.
   🔵 1,06 a 1,10 | Ótimo / Eficiente: O diagnóstico deve celebrar a excelente economia de corrida sob fadiga, destacando que o coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo constante e acumulando volume de rodagem.
@@ -93,12 +96,30 @@ CENÁRIO 3: DESVIO PARA A ZONA CINZENTA - ZONA 3 PREDOMINANTE
 -------------------------------------------------------------
 - Gatilho do Strava: Tempo de treino >= 45 min E Frequência Cardíaca Média mantida entre 140 e 147 bpm.
 - Diagnóstico Clínico-Esportivo da IA: "O treino invadiu o 'Ponto de Cruzamento' (Cross-over Point) metabólico. Nessa faixa cardíaca (140-147 bpm), a depuração de lactato pelas suas mitocôndrias é sobrecarregada, atingindo a barreira crítica de 2.0 mM. Conforme demonstrado por San-Millán, o acúmulo de lactato inibe diretamente o transporte de ácidos graxos para a matriz mitocondrial. De acordo com o modelo de Stephen Seiler (2010), o esforço entrou na Zona 2 de Limiar (~75% a 85% do VO₂ máx), uma faixa de transição estressante que, se usada em excesso nas rodagens, gera um cansaço residual que sabota os dias de tiro, impedindo a expansão real do seu teto de VO₂ máx. Embora você tenha gerado ganho cardiovascular, a taxa de queima de gordura caiu drasticamente, forçando o corpo a depender de carboidratos e gerando fadiga residual desnecessária para uma rodagem de base."
+- Validação pelo Efficiency Index da Sessão (Calibrado para a Zona Cinzenta): A IA deve ler o 'efficiency_index' gerado nesta sessão e avaliar o nível de quebra da polarização com os seguintes cortes:
+
+ÍNDICE DE EFICIÊNCIA AERÓBICA
+🏷️ Legenda:
+  🔴 < 1,00 | Regular (Eficiência Degradada): O diagnóstico deve emitir um alerta severo. Indica que além de invadir a zona de transição, o custo cardiovascular foi desproporcionalmente alto para o ritmo gerado. Houve forte degradação mecânica e cardiovascular, gerando acúmulo de fadiga residual prejudicial sem o ganho de velocidade correspondente.
+  🟡 1,00 a 1,05 | Bom / Estável no Limiar: Mostra que embora você esteja no limiar estressante, o motor cardiovascular se manteve firme. O diagnóstico deve apontar que o treino cumpriu o ritmo mais forte, mas reforçar que o estresse metabólico silencioso foi ativado, exigindo cuidado com a recuperação.
+  🔵 1,06 a 1,10 | Ótimo / Ritmo Firme: Indica que você desenvolveu boa velocidade com um coração respondendo bem. Contudo, o diagnóstico deve advertir que este índice mascara um falso progresso aeróbico: a via glicolítica foi altamente exigida, depletando estoques de glicogênio de forma desnecessária.
+  🟢 > 1,10 | Excelente Eficiência / Zona de Risco: Embora a relação velocidade/FC pareça mecanicamente excelente, o diagnóstico deve alertar que você correu no limite superior da Zona Cinzenta com alta economia. Isso sinaliza perigo crônico de quebrar a polarização 80/20 de Seiler, sabotando a biogênese mitocondrial profunda.
+
+- Diagnóstico Clínico-Esportivo da IA: "O treino invadiu o 'Ponto de Cruzamento' (Cross-over Point) metabólico. Nessa faixa cardíaca (140-147 bpm), a depuração de lactato pelas suas mitocôndrias é sobrecarregada, atingindo a barreira crítica de 2.0 mM. Conforme demonstrado por San-Millán, o acúmulo de lactato inibe diretamente o transporte de ácidos graxos para a matriz mitocondrial. De acordo com o modelo de Stephen Seiler (2010), o esforço entrou na Zona 2 de Limiar (~75% a 85% do VO₂ máx), uma faixa de transição estressante que, se usada em excesso nas rodagens, gera um cansaço residual que sabota os dias de tiro, impedindo a expansão real do seu teto de VO₂ máx. Embora você tenha gerado ganho cardiovascular, a taxa de queima de gordura caiu drasticamente, forçando o corpo a depender de carboidratos e gerando fadiga residual desnecessária para uma rodagem de base."
 
 ------------------------------------------------------------
-CENÁRIO 4: SOBRECARGA GLICOLÍTICA - ZONA 3 e 4 PREDOMINANTE  
+CENÁRIO 4: SOBRECARGA GLICOLÍTICA - ZONA 4 PREDOMINANTE  
 (BLOQUEIO DE SINALIZAÇÃO AERÓBICA)
 ------------------------------------------------------------
-- Gatilho do Strava: Tempo de treino >= 30 min E Frequência Cardíaca Média acima de 148 bpm (predominância em Z3/Z4).
+- Gatilho do Strava: Tempo de treino >= 30 min E Frequência Cardíaca Média acima de 148 - 159 bpm (predominância em Z3/Z4).
+- Validação pelo Efficiency Index da Sessão (Calibrado para Sobrecarga Glicolítica): A IA deve ler o 'efficiency_index' gerado nesta sessão e avaliar o nível de desgaste celular e quebra de padrão com os seguintes cortes:
+
+ÍNDICE DE EFICIÊNCIA AERÓBICA
+🏷️ Legenda:
+  🔴 < 1,00 | Regular (Colapso de Eficiência): O diagnóstico deve emitir um alerta crítico. O custo cardiovascular foi absurdamente alto para a velocidade entregue. O corpo entrou em fadiga mecânica prematura devido à acidose extrema, resultando em um treino altamente desgastante e ineficiente.
+  🟡 1,00 a 1,05 | Bom / Limiar de Resistência: Indica que apesar do ambiente ácido severo (lactato estimado > 2.5 mM), a mecânica de corrida conseguiu segurar o ritmo. O diagnóstico deve pontuar a resistência muscular, mas alertar que o preço pago em estresse oxidativo prejudica a recuperação.
+  🔵 1,06 a 1,10 | Ótimo / Alta Rotação Sustentada: Mostra que você desenvolveu muita velocidade gerando um índice alto. Contudo, o diagnóstico deve advertir firmemente que esta eficiência mecânica cobra um preço invisível: o estresse celular sustentado bloqueou a sinalização aeróbica das fibras de contração lenta.
+  🟢 > 1,10 | Excelente Eficiência / Zona de Sobrecarga Máxima: Embora a relação velocidade/FC indique uma potência mecânica fantástica em alta rotação, o diagnóstico deve ser de advertência severa: rodar de forma contínua neste patamar drena os estoques de glicogênio e sabota totalmente o modelo polarizado 80/20.
 - Diagnóstico Clínico-Esportivo da IA: "Atenção: O treino gerou um estresse glicolítico severo e sustentado. Com os batimentos acima de 148 bpm, os níveis estimados de lactato ultrapassaram os 2.5 mM, ativando um estado de acidose muscular aguda. Sob a ótica molecular de Casanova et al. (2023), este nível de estresse ativa vias associadas ao mTOR de forma crônica e eleva o estresse oxidativo (ROS) além do limite de recuperação saudável. Conforme os achados de Stephen Seiler (2010), o esforço contínuo nesta faixa ultrapassa o limiar ventilatório, acumulando mais de 4 mM de lactato; treinar de forma sustentada aqui falha em gerar os estímulos hormonais agudos necessários para elevar o VO₂ máx, atuando apenas como um dreno de energia e desgaste celular. Esse padrão inibe a sinalização para o desenvolvimento de mitocôndrias de contração lenta, reduzindo a sua capacidade de queimar gordura no longo prazo."
 
 ----------------------------------------------------
@@ -107,6 +128,15 @@ CENÁRIO 5: DERIVA CARDÍACA OU CANSAÇO ACUMULADO
 ----------------------------------------------------
 
 - Gatilho do Strava: Primeiro terço do treino em Zona 2 (124-138 bpm), mas os dois terços finais sustentados na Zona Cinzenta (140-147 bpm), SEM que tenha ocorrido aumento real no ritmo de corrida (pace).
+
+ÍNDICE DE EFICIÊNCIA AERÓBICA
+🏷️ Legenda:
+- Validação pelo Efficiency Index da Sessão (Calibrado para Deriva Cardíaca): A IA deve ler o 'efficiency_index' gerado nesta sessão e diagnosticar a perda de economia de corrida com os seguintes cortes:
+  🔴 < 1,00 | Regular (Drift Severo / Exaustão Autônoma): O diagnóstico deve acender o sinal vermelho de alerta. O custo cardiovascular disparou e destruiu a eficiência do treino. Isso comprova uma forte desidratação, calor extremo ou fadiga crônica acumulada, indicando que o sistema cardiovascular entrou em colapso para segurar o mesmo ritmo.
+  🟡 1,00 a 1,05 | Bom / Limiar de Resistência ao Drift: Mostra que apesar da deriva cardíaca ter ocorrido na segunda metade do treino, a sua base aeróbica inicial conseguiu segurar a média da eficiência em um patamar aceitável. O diagnóstico deve apontar que o motor resistiu, mas alertar sobre o cansaço residual.
+  🔵 1,06 a 1,10 | Ótimo / Falso Equilíbrio: Um índice nesta faixa indica que você começou a sessão com uma economia espetacular (coração muito folgado no primeiro terço). O diagnóstico deve explicar que a média foi inflada pelo início excelente, mas alertar que o surgimento da deriva nos terços finais quebrou esse padrão.
+  🟢 > 1,10 | Excelente Eficiência / Incompatível com o Gatilho: Caso o índice geral fique neste patamar, a IA deve apontar uma inconsistência matemática positiva: sua economia mecânica está tão absurdamente alta que o coração subir de rotação foi uma resposta transiente, e não um desgaste crônico por fadiga de endurance.
+
 - Diagnóstico Clínico-Esportivo da IA: "Detectada Deriva Cardíaca (Cardiovascular Drift) precoce. Você iniciou o treino na zona metabólica ideal (FATmax), mas o seu coração precisou subir de rotação para manter o mesmo ritmo de corrida. O estudo de San-Millán explica que isso ocorre por duas razões: ou há uma desidratação/fadiga cardiovascular acumulada, ou suas mitocôndrias esgotaram rapidamente a capacidade de clarear o lactato inicial, forçando o recrutamento de fibras glicolíticas mais cedo. Sob a análise de Stephen Seiler (2010), essa transição involuntária da Zona 1 para a Zona 2 de esforço reduz drasticamente o tempo útil de treino regenerativo e sinaliza que a fadiga interna está diminuindo a sua economia de corrida, reduzindo a fração de VO₂ máx que você consegue sustentar de forma estável. Monitore o seu descanso e hidratação antes das próximas rodagens."
 
 ---------------------------------------------------------------------------------------------------------------------
@@ -120,6 +150,9 @@ REGRA CRÍTICA DE ANÁLISE: Treino estruturado em blocos (frequentes oscilaçõe
   3. Se houver pelo menos 3 ou mais dessas oscilações cíclicas (Pico de Esforço -> Queda de Recuperação) na série temporal, classifique OBRIGATORIAMENTE o treino neste cenário, mesmo que a FC Média total da sessão tenha ficado abaixo de 145 bpm.
 
 - Validação pelo Efficiency Index da Sessão (Conforme Legenda Geral): A IA deve ler o 'efficiency_index' gerado especificamente nesta sessão de alta intensidade e correlacionar com o nível de adaptação molecular:
+
+ÍNDICE DE EFICIÊNCIA AERÓBICA
+🏷️ Legenda:
   🔴 < 1,00 | Regular (Abaixo da Média): O diagnóstico deve apontar que o custo cardiovascular foi severo para os tiros desenvolvidos. Comum em dias de fadiga crônica, calor extremo ou quando o atleta treinou abaixo das zonas cardíacas estipuladas, alertando que a via NOX2 pode não ter sido plenamente estimulada de forma saudável.
   🟡 1,00 a 1,05 | Bom / Estável: O diagnóstico valida que a sessão de tiros foi muito bem absorvida, gerando estresse hormético controlado e acionando perfeitamente a recarga energética pós-treino.
  🔵 1,06 a 1,10 | Ótimo / Eficiente: O diagnóstico deve celebrar o excelente nível de economia de corrida e eficiência neuromuscular nas repetições. O coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo de tiro rápido e agressivo, comprovando que a fusão e a remodelação mitocondrial estão blindando o músculo contra a fadiga precoce.
@@ -131,7 +164,26 @@ CENÁRIO 7: DURAÇÃO INSUFICIENTE
 (FALTA DE SINALIZAÇÃO AGUDA)
 ------------------------------------------
 - Gatilho do Strava: Tempo de treino total < 30 min, ou seja, insuficiente mesmo a Frequência Cardíaca ter ficado na Zona 2 (124-138 bpm).
+- Validação Volumétrica da Sessão (Calibrado para Duração Insuficiente): A IA deve ignorar a classificação por faixas do 'efficiency_index', uma tempo de treino inferior a 30 minutos inviabiliza a análise de economia de corrida sustentada. O diagnóstico deve adotar o seguinte critério único de feedback:
+  ⚠️ NOTA DE SUB-ESTÍMULO | Treino Curto / Regenerativo Puro: O diagnóstico deve classificar a sessão exclusivamente como um estímulo de recuperação ativa. A IA deve alertar o atleta de que, embora o ritmo e os batimentos tenham sido controlados, a sessão não ativou a via PGC-1alpha de maneira crônica devido à falta de estresse por volume.
 - Diagnóstico Clínico-Esportivo da IA: "Treino seguro, porém sub-limiar para adaptação mitocondrial profunda. Embora você tenha mantido os batimentos cardíacos na zona correta de oxidação de gordura, o tempo de estímulo foi inferior a 30 minutos. Os mecanismos de sinalização celular para biogênese e expressão das proteínas transportadoras de lactato (MCT-1) necessitam de uma demanda volumétrica contínua para consolidar as alterações genéticas na célula. Na perspectiva de Stephen Seiler (2010), treinos de baixa intensidade exigem uma duração expandida (estresse por volume) para gerar adaptações cardíacas estruturais. Embora excelente para recuperação, o estímulo foi curto demais para sinalizar ao organismo o estresse crônico necessário para construir a base do seu VO₂ máx. Considere estender suas rodagens de Zona 2 para além de 45 a 60 minutos para colher os benefícios dos estudos de San-Millán."
+
+---------------------------------------------------------------------------------------------------------------------
+CENÁRIO 8: CAPACIDADE CARDIOVASCULAR MÁXIMA - ZONA 5 PREDOMINANTE  
+(EXAUSTÃO DO TETO DO VO2 MÁX)
+---------------------------------------------------------------------------------------------------------------------
+- Gatilho do Strava: Tempo de treino contínuo ou em blocos longos sustentados >= 20 min com Frequência Cardíaca Média ou predominante estritamente na Zona 5 (Acima de 160 bpm).
+
+- Validação pelo Efficiency Index da Sessão (Calibrado para Zona 5): A IA deve ler o 'efficiency_index' gerado nesta sessão de exaustão e avaliar a capacidade de entrega de potência em alta rotação com os seguintes cortes:
+
+ÍNDICE DE EFICIÊNCIA AERÓBICA
+🏷️ Legenda:
+  🔴 < 1,00 | Regular (Falência de Eficiência): Alerta crítico. O coração trabalhou no teto absoluto (>160 bpm) mas a velocidade desenvolvida foi proporcionalmente muito baixa. Sinaliza fadiga severa do miocárdio, desidratação extrema ou que o estresse térmico degradou totalmente a mecânica antes do tempo.
+  🟡 1,00 a 1,05 | Bom / Estabilidade sob Pressão: Mostra que o motor aguentou a rotação máxima com bom nível de tolerância. O diagnóstico deve apontar que o sistema de transporte de oxigênio operou sob demanda limite de forma firme, mantendo a mecânica estável.
+  🔵 1,06 a 1,10 | Ótimo / Alta Potência Cardiovascular: Indica uma excelente resposta neuromuscular e economia de corrida soberba em altíssima rotação. O corpo entregou velocidades expressivas mantendo a eficiência mesmo com o coração no limite do teto cardiovascular.
+  🟢 > 1,10 | Excelente / Pico Absoluto de VO2 máx: O diagnóstico deve celebrar o estado de elite do atleta. O corpo alcançou o pico máximo de potência mecânica gastando o mínimo de energia relativa na Zona 5, comprovando que o teto de captação e consumo de oxigênio foi agressivamente expandido.
+
+- Diagnóstico Clínico-Esportivo da IA: "Alerta de esforço extremo: Sua sessão desafiou agressivamente o teto máximo de transporte de oxigênio na Zona 5 (acima de 160 bpm), o equivalente ao modelo de alta intensidade de Stephen Seiler (2010). Esse estímulo contínuo ou sustentado gerou níveis severos de lactato sanguíneo (estimados acima de 4.0 mM) e uma depleção crítica de ATP celular. Sob a ótica molecular de Casanova et al. (2023), essa avalanche força o sistema a recrutar e estressar o complexo mitocondrial ao limite de sua capacidade de trabalho limpo (OXPHOS). É o gatilho neuroendócrino mais agressivo para expandir o consumo máximo de oxigênio (VO₂ máx). Contudo, por gerar acúmulo massivo de radicais livres (ROS) e severa acidose, esta zona exige uma janela obrigatória de até 48 horas de descanso ou rodagem leve em Zona 2 para que a via molecular se consolide sem causar overtraining."
 
 ------------------------------------------------------------------------------------------------------
 REGRA DE PROGRESSÃO EM VOLUME CURTO A MÉDIO PARA TERÇAS-FEIRAS (ZONA 2(124 - 138 BPM) - BASE AERÓBICA)
@@ -214,6 +266,9 @@ NÍVEL 4: CAPACIDADE GLICOLÍTICA EXTREMA (SARGENTO HORMÉTICO)
 - Intensidade: Rotação máxima do motor (BPM > 162 bpm).
 - Recuperação: 1 minuto de caminhada (recuperação incompleta para forçar o músculo a trabalhar sob forte acidose).
 - Desaquecimento: 8 minutos de caminhada livre.
+
+
+- Justificativa Biológica (Adaptação Molecular para Quintas-Feiras): Explicar ao usuário que os tiros intermitentes de alta intensidade possuem o papel crucial de ativar o complexo enzimático NADPH Oxidase 2 (NOX2) nas fibras musculares esqueléticas. Essa ativação gera espécies reativas de oxigênio (ROS) saudáveis que atuam como segundos mensageiros compartimentados no núcleo celular. É esse estresse hormético agudo que desencadeia o aumento das defesas antioxidantes (SOD2 e Catalase) contra a fadiga precoce, eleva a enzima Hexokinase II (HKII) para otimizar a captação de glicose pós-esforço, e promove a remodelação crônica da rede mitocondrial por meio da fusão celular, permitindo que o atleta corra mais rápido com menor percepção de esforço.
 =======================================================================
 DIRETRIZES - REPOSIÇÃO E DESCANSO PÓS-TREINO
 =======================================================================

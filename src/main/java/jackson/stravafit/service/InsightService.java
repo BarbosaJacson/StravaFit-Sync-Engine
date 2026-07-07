@@ -54,7 +54,7 @@ public class InsightService {
                           @Value("${atleta.hr-max:173}") int hrMaxConfig,
                           @Value("${atleta.hr-resting:53}") int hrResting,
                           @Value("${atleta.idade:47}") int idadeAtleta,
-                          @Value("${atleta.nome:Jacson}") String nomeAtleta) {
+                          @Value("${atleta.nome:JACSON}") String nomeAtleta) {
         this.geminiClient = geminiClient;
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
@@ -165,15 +165,20 @@ public class InsightService {
             String paceFormatted) {}
 
     private SessionMetrics calcularMetricasSessao(List<StravaActivity.MinuteAnalysis> analysis, Double distance, Double averageSpeed, ZonedDateTime date) {
-        double fcMedia = analysis.stream()
+        // Otimização: Usar DoubleSummaryStatistics para calcular média e max em uma única passagem.
+        DoubleSummaryStatistics hrAvgStats = analysis.stream()
                 .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
                 .filter(Objects::nonNull)
-                .mapToDouble(Double::doubleValue).average().orElse(0.0);
+                .mapToDouble(Double::doubleValue)
+                .summaryStatistics();
 
+        // Correção: Calcula o fcMax real buscando o pico máximo da telemetria.
         double fcMax = analysis.stream()
                 .map(StravaActivity.MinuteAnalysis::getMaxHeartRate)
                 .filter(Objects::nonNull)
                 .mapToDouble(Double::doubleValue).max().orElse(0.0);
+
+        double fcMedia = hrAvgStats.getAverage();
 
         int duracao = analysis.size();
         double variance = analysis.stream()
@@ -323,20 +328,6 @@ public class InsightService {
                 .append("- Foco Técnico: ").append(plano.getFocus()).append("\n\n")
                 .append("INSTRUÇÃO: Avalie se o atleta cumpriu o plano ou se houve desvio.\n\n"));
 
-        // Busca a penúltima prescrição para dar contexto de ciclo de treino
-        // Lógica aprimorada: Busca a prescrição mais recente ANTERIOR à data do treino atual.
-        workoutPrescriptionRepository.findAll().stream()
-                .filter(p -> p.getScheduledDate().isBefore(date.toLocalDate()))
-                .max(Comparator.comparing(WorkoutPrescriptionEntity::getScheduledDate))
-                .ifPresent(penultimatePlano -> {
-                    sb.append("--- REFERÊNCIA DO TREINO ANTERIOR PRESCRITO ---\n");
-                    sb.append(String.format("- Data: %s\n", penultimatePlano.getScheduledDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))));
-                    sb.append(String.format("- Duração: %s\n", penultimatePlano.getDuration()));
-                    sb.append(String.format("- Intensidade (Faixa de FC): %s\n", penultimatePlano.getIntensity()));
-                    sb.append(String.format("- Foco: %s\n\n", penultimatePlano.getFocus()));
-                    sb.append("INSTRUÇÃO: Use estes dados como referência do ciclo de treino anterior para avaliar a progressão ou fadiga do atleta.\n\n");
-                });
-
         sb.append("--- DADOS DO TREINO ATUAL ---\n");
         sb.append(String.format("- Duração: %d minutos\n", metrics.duracao()));
         sb.append(String.format("- FC Média: %.0f bpm | Máx: %.0f bpm\n", metrics.fcMedia(), metrics.fcMax()));
@@ -363,6 +354,7 @@ public class InsightService {
         sb.append("\n📊 Histórico Médio (Últimos 10 treinos):\n[Transcreva aqui os dados do bloco 'CONTEXTO HISTÓRICO' em formato de lista, como VO2 Médio, FC Média, etc.]\n\n");
 
         sb.append("📋 Referência (Treino Anterior Prescrito):\n[Se houver dados no bloco 'REFERÊNCIA DO TREINO ANTERIOR PRESCRITO', transcreva-os aqui de forma resumida, incluindo Data, Duração e Foco.]\n\n");
+
         sb.append("🩺 DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n")
                 .append("\n - [Com base no 'Tipo de Intensidade Detectado' fornecido, busque o cenário correspondente na 'MATRIZ DE DECISÃO' do arquivo 'studySettings.txt' e transcreva integralmente o seu respectivo campo 'Diagnóstico Clínico-Esportivo da IA', adaptando o tratamento para falar de forma amigável e direta com ").append(nomeAtleta).append("]\n\n")
 
@@ -385,26 +377,28 @@ public class InsightService {
                 .append("Com base nessas diretrizes, forneça recomendações específicas para ").append(nomeAtleta).append(", considerando a intensidade e duração do treino atual.\n")
                 .append("[Orientações de reposição e descanso extraídas do CONTEXTO CIENTÍFICO dirigidas a ").append(nomeAtleta).append("]\n\n");
 
-        sb.append("--- PRESCRIÇÃO STRAFIT PREDICT ---\n");
+        sb.append("--- PRESCRIÇÃO STRAFIT PREDICT PARA ").append(proximoTreinoData.toUpperCase()).append(" ---\n");
         sb.append("DATA PROGRAMADA: ").append(proximoTreinoData).append("\n\n")
                 .append("DIRETRIZES OBRIGATÓRIAS DE PRESCRIÇÃO (CONSULTAR MATRIZ DE CONHECIMENTO INCLUÍDA NO ARQUIVO STUDYSETTINGS):\n")
                 .append("1. REGRA DE OURO DO CALENDÁRIO: Identifique o dia da semana em 'DATA PROGRAMADA' e prescreva estritamente o tipo de treino correspondente, cruzando com os conceitos do arquivo 'studySettings':\n\n")
 
-                .append("   - 📅 Se 'DATA PROGRAMADA' for SÁBADO:\n")
+                .append("\n\n📅 Se 'DATA PROGRAMADA' for SÁBADO:\n")
                 .append("     1. 🟢 Prescreva OBRIGATORIAMENTE um TREINO LONGO focado em Volume Puro e Eficiência Mitocondrial na Zona 2 (124 a 138 bpm).\n")
                 .append("     2. 🛑 É terminantemente PROIBIDO prescrever tiros, HIIT ou alta intensidade (Zonas 3/4/5) aos sábados ou terças-feiras.\n")
                 .append("     3. ⏳ DURAÇÃO POR EFFICIENCY INDEX: Consulte obrigatoriamente a seção 'REGRA DE PROGRESSÃO EM VOLUME LONGO PARA OS SÁBADOS' no arquivo 'studySettings.txt'. Avalie estritamente a média do 'efficiency_index' obtida nos últimos 5 treinos longos da tabela activity_performance_summary e aplique os critérios exatos de corte:\n")
                 .append("        - 🔒 TRAVA DE RETENÇÃO (Média entre 0.94 e 1.07): Retenha o atleta obrigatoriamente no tempo base de 60 a 75 minutos.\n")
                 .append("        - 📈 PROGRESSÃO GRADUAL (Média >= 1.08): Quebre a trava e progrida a duração para 80 a 85 minutos.\n")
-                .append("     4. 🧠 JUSTIFICATIVA BIOLÓGICA: Gere a justificativa clínica de proteção do sistema nervoso autônomo com base nos achados de Stephen Seiler (2010), explicando como a manutenção da rotação no ponto doce do FATmax consolida a capilarização muscular sem gerar fadiga residual.\n\n")
+                .append(" \n\n4. 🧠 JUSTIFICATIVA BIOLÓGICA: Gere a justificativa clínica de proteção do sistema nervoso autônomo com base nos achados de Stephen Seiler (2010), explicando como a manutenção da rotação no ponto doce do FATmax consolida a capilarização muscular sem gerar fadiga residual.\n\n")
 
-                .append("   - 📅 Se 'DATA PROGRAMADA' for TERÇA-FEIRA:\n")
+                .append("\n\n 📅 Se 'DATA PROGRAMADA' for TERÇA-FEIRA:\n")
                 .append("     1. 🏃‍♂️ PRESCRIÇÃO E FOCO METABÓLICO: Prescreva um treino curto ou médio em ZONA 2 com foco estrito em oxidação máxima de gordura (FATmax) e clareamento de lactato basal, mantendo os batimentos rigidamente entre 124 a 138 bpm.\n")
                 .append("     2. ⚠️ OBRIGATORIEDADE DE CONSULTA E PROGRESSÃO EM VOLUME: Consulte obrigatoriamente a seção 'REGRA DE PROGRESSÃO EM VOLUME CURTO A MÉDIO PARA TERÇAS-FEIRAS (ZONA 2(124 - 138 BPM) - BASE AERÓBICA)' no arquivo 'studySettings.txt'. Avalie a média do 'efficiency_index' dos últimos 5 treinos curtos ou médios do usuário na tabela activity_performance_summary.\n")
                 .append("     3. ⏳ REGRAS DE CORTE DE TEMPO:\n")
                 .append("        - 🔒 TRAVA DE RETENÇÃO (Média entre 0.94 e 1.04): Mantenha a duração retida entre 45 a 60 minutos para consolidação capilar.\n")
                 .append("        - 📈 PROGRESSÃO GRADUAL (Média >= 1.05): Quebre a retenção e expanda o tempo total da sessão para 65 a 75 minutos, justificando que a alta economia de corrida permite expandir o suporte volumétrico celular.\n")
                 .append("     4. ⚖️ RECALIBRAÇÃO DE FADIGA RESIDUAL: Caso o 'efficiency_index' médio recente esteja abaixo de 1.05, ou se o último Treino Longo do histórico apresentar desvio (Zona Cinzenta ou Sobrecarga Glicolítica), aborte a progressão. Force o tempo para o patamar mínimo de 45 a 60 minutos para restaurar a flexibilidade metabólica sem gerar desgaste para a quinta-feira.\n\n")
+                .append("\n\n 5. 🧠 JUSTIFICATIVA BIOLÓGICA: Gere a justificativa clínica de regeneração celular com base no arquivo 'studySettings.txt', explicando como a manutenção do treino curto a médio no ponto doce do FATmax limpa o estresse ácido residual, otimiza a eficiência glicolítica e garante o ambiente molecular perfeito para o corpo chegar totalmente recuperado para os estímulos de intensidade.\n\n")
+
 
                 .append("   - Se 'DATA PROGRAMADA' for QUINTA-FEIRA:\n")
                 .append("     1. Prescreva OBRIGATORIAMENTE um TREINO DE INTENSIDADE (TIROS/HIIT).\n\n")
@@ -418,6 +412,8 @@ public class InsightService {
                 .append("   - AVALIAÇÃO BASEADA NO EFFICIENCY INDEX: Avalie a média do 'efficiency_index' obtida estritamente nos últimos 5 treinos de alta intensidade (Cenário 6).\n")
                 .append("   - DIRETRIZ DE MANUTENÇÃO E PROGRESSÃO: Se o 'efficiency_index' médio recente estiver consolidado entre 0.94 e 1.05, a meta para o próximo nível não é correr mais rápido, mas sim MANTER esse mesmo nível de eficiência mecânica/cardiovascular sob o volume expandido do novo nível (ex: sustentar a eficiência migrando de tiros de 1 min para tiros de 2 ou 3 min, conforme a Matriz de Progressão).\n")
                 .append("   - ORIENTAÇÃO DE EXECUÇÃO À IA: Instrua o usuário a focar na estabilização do 'efficiency_index' e na resposta da Frequência Cardíaca Alvo do nível estipulado no arquivo 'studySettings.txt' (Nível 2: 150-155 bpm | Nível 3: >155 bpm), explicando que a verdadeira evolução da via NOX2 se dá pelo aumento do tempo sob o estímulo correto, e não pelo ganho de velocidade isolada.\n\n")
+                .append("     🧠 JUSTIFICATIVA BIOLÓGICA: Gere a justificativa clínica com base na seção 'MATRIZ DE PROGRESSÃO DE INTENSIDADE' do arquivo 'studySettings.txt', explicando como os tiros intermitentes de alta intensidade ativam o complexo enzimático NADPH Oxidase 2 (NOX2) nas fibras esqueléticas, gerando espécies reativas de oxigênio (ROS) saudáveis como segundos mensageiros. Detalhe como essa sinalização hormética aguda desencadeia defesas antioxidantes (SOD2 e Catalase), melhora a eficiência glicolítica via Hexokinase II (HKII) e promove a remodelação e fusão da rede mitocondrial para correr mais rápido com menor esforço.\n\n")
+
 
                 .append("4. FORMATO VISUAL OBRIGATÓRIO (PARA O USUÁRIO):\n")
                 .append("Apresente a prescrição obrigatoriamente neste formato de lista antes de qualquer outro texto:\n")
@@ -426,7 +422,8 @@ public class InsightService {
                 .append("Duração: [Tempo ou distância prevista]\n")
                 .append("Intensidade: [FC alvo e Zona de esforço]\n")
                 .append("Foco: [Objetivo técnico ou biológico]\n")
-                .append("Método: [Breve explicação de como executar]\n");
+                .append("Método: [Breve explicação de como executar]\n")
+                .append("Justificativa Biológica: [Insira obrigatoriamente a Justificativa Clínica/Bioquímica detalhada de acordo com as regras específicas do dia de treino (Seiler/NOX2/FATmax)]\n\n");
 
         sb.append("\n--- INSTRUÇÃO TÉCNICA DO SISTEMA ---\n")
                 .append("Ao final do relatório, adicione OBRIGATORIAMENTE um bloco estruturado no formato XML abaixo ")
