@@ -1,0 +1,62 @@
+{
+  "cenarios": [
+    {
+      "id": 1,
+      "titulo": "CENÁRIO 1: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX)",
+      "zona_cardiaca_alvo": "Z2",
+      "faixa_bpm": "124-138",
+      "regra_aplicabilidade": {
+        "criterio_ativacao": "O cenário só será considerado ATIVO e aplicável se o atleta atender rigorosamente ao volume/nível estipulado na prescrição (workout_prescriptions) para a data e se a validação do desempenho for balizada pelo efficiency_index correspondente.",
+        "estabilidade_ritmo_exigida": "Desvio padrão da frequência cardíaca baixo (indicação de ritmo constante e sem picos fora da Z2)."
+      },
+      "patamar_retencao": {
+        "tempo_min_minutos": 45,
+        "tempo_max_minutos": 60,
+        "descricao": "Fase de consolidação capilar e base aeróbica básica."
+      },
+      "faixas_progressao": [
+        {
+          "nivel": 1,
+          "tempo_min_minutos": 65,
+          "tempo_max_minutos": 75,
+          "descricao": "Expansão celular inicial. Avaliar se o Efficiency Index se mantém estável mesmo com o aumento do tempo."
+        },
+        {
+          "nivel": 2,
+          "tempo_min_minutos": 76,
+          "tempo_max_minutos": 90,
+          "descricao": "Evolução intermediária de volume. O foco é manter o acoplamento cardiovascular sem subida da FC tardia."
+        },
+        {
+          "nivel": 3,
+          "tempo_min_minutos": 91,
+          "tempo_max_minutos": 120,
+          "descricao": "Alto volume aeróbico (Rodagem Longa). O Efficiency Index aqui valida a real flexibilidade metabólica e endurance do atleta."
+        },
+        {
+          "nivel": 4,
+          "tempo_min_minutos": 121,
+          "tempo_max_minutos": 150,
+          "descricao": "Volume Avançado de Endurance Extrema. Avaliação crucial do desvio padrão da FC e degradação do ritmo (Pace Drift) em estado estável prolongado."
+        },
+        {
+          "nivel": 5,
+          "tempo_min_minutos": 151,
+          "tempo_max_minutos": 180,
+          "descricao": "Teto Máximo de Rodagem de Longa Distância. Monitoramento estrito do Efficiency Index sob severa depleção de glicogênio e máxima dependência de oxidação lipídica."
+        }
+      ],
+      "legendas_eficiencia": {
+        "regular": "🔴 < 1,00 | Regular (Abaixo da Média): Indica que o custo cardiovascular foi proporcionalmente alto para a rodagem de terça-feira. Alerta para fadiga acumulada do final de semana, interferência climática ou ritmo excessivo que violou o propósito regenerativo do dia.",
+        "bom": "🟡 1,00 a 1,05 | Bom / Estável: Mostra que o treino curto/médio cumpriu perfeitamente o papel homeostático na Zona 2. É o seu padrão consolidado de base aeróbica saudável, limpando resíduos sem agredir o organismo.",
+        "otimo": "🔵 1,06 a 1,10 | Ótimo / Eficiente: Indica excelente economia de corrida no volume de terça-feira. Seu coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo constante, sinalizando excelente adaptação cardiovascular.",
+        "excelente": "🟢 > 1,10 | Excelente / Altamente Otimizado: Seu pico máximo de eficiência para treinos curtos/médios. O corpo gastou o mínimo de energia celular para entregar a velocidade, comprovando que a biogênese mitocondrial está no topo e você está totalmente recuperado."
+      },
+      "diagnosticos_clinicos": [
+        "Execução perfeita alinhada a San-Millán & Brooks (2017) e Stephen Seiler (2010). Sua intensidade de esforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM), mantendo os batimentos perfeitamente regulados na Zona 2 (124-138 bpm). A análise do seu 'efficiency_index' nesta sessão confirma que a relação velocidade/frequência cardíaca foi altamente favorável. Esse estresse volumétrico controlado ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial saudável nas fibras musculares Tipo I, otimizando a sua flexibilidade metabólica e garantindo a recuperação ideal para os stimuli de alta intensidade da semana."
+      ]
+    }
+  ]
+}
+
+
