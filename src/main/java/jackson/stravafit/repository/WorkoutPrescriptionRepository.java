@@ -10,6 +10,12 @@ import java.util.Optional;
 @Repository
 public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPrescriptionEntity, Long> {
 
+    // Busca a última prescrição para uma data específica
+    Optional<WorkoutPrescriptionEntity> findTopByScheduledDateOrderByCreatedAtDesc(LocalDate scheduledDate);
+
+    // Busca a última prescrição gerada, independente da data
+    Optional<WorkoutPrescriptionEntity> findTopByOrderByCreatedAtDesc();
+    
+    // Adicionado para a lógica de UPSERT no InsightService
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
-    Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
 }

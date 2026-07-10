@@ -1,62 +1,345 @@
 {
+  "atleta_profile": {
+    "_id": { "$oid": "6a4ffbf243c3c4618a162859" },
+    "atletaId": "jacson_barbosa_01",
+    "nome": "Jacson Barbosa",
+    "idade": 47,
+    "peso_kg": 79,
+    "configuracao_fisiologica": {
+      "fc_maxima_bpm": 173,
+      "fc_repouso_bpm": 50,
+      "vo2_max_atual": 45.6,
+      "metodo_calculo_zonas": "Fórmula de Karvonen",
+      "zonas_cardiacas_alvo": {
+        "Z1_recovery": "112-122",
+        "Z2_fatmax": "124-138",
+        "Z_cinzenta": "140-147",
+        "Z3_Z4_glicolitico": "148-159",
+        "Z5_vo2max": ">=160"
+      }
+    },
+    "cronograma_semanal_treino": [
+      {
+        "dia_semana": "TERÇA-FEIRA",
+        "cenarioId_obrigatorio": 1,
+        "tipo_estimulo": "Eficiência Metabólica (FATmax)",
+        "nivel_atual": 1,
+        "semanas_no_nivel_atual": 0,
+        "historico_sessoes_consecutivas_aprovadas": 0,
+        "status_bloqueio": "RETENÇÃO"
+      },
+      {
+        "dia_semana": "QUINTA-FEIRA",
+        "cenarioId_obrigatorio": 2,
+        "tipo_estimulo": "Intensidade - Capacidade Anaeróbica (Tiros)",
+        "nivel_atual": 1,
+        "semanas_no_nivel_atual": 0,
+        "historico_sessoes_consecutivas_aprovadas": 0,
+        "status_bloqueio": "RETENÇÃO"
+      },
+      {
+        "dia_semana": "SÁBADO",
+        "cenarioId_obrigatorio": 1,
+        "tipo_estimulo": "Eficiência Metabólica (FATmax - Longo)",
+        "nivel_atual": 4,
+        "semanas_no_nivel_atual": 0,
+        "historico_sessoes_consecutivas_aprovadas": 0,
+        "status_bloqueio": "RETENÇÃO"
+      }
+    ]
+  },
   "cenarios": [
     {
-      "id": 1,
+      "_id": { "$oid": "6a4ff92543c3c4618a162855" },
+      "cenarioId": 1,
       "titulo": "CENÁRIO 1: EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX)",
       "zona_cardiaca_alvo": "Z2",
       "faixa_bpm": "124-138",
       "regra_aplicabilidade": {
-        "criterio_ativacao": "O cenário só será considerado ATIVO e aplicável se o atleta atender rigorosamente ao volume/nível estipulado na prescrição (workout_prescriptions) para a data e se a validação do desempenho for balizada pelo efficiency_index correspondente.",
-        "estabilidade_ritmo_exigida": "Desvio padrão da frequência cardíaca baixo (indicação de ritmo constante e sem picos fora da Z2)."
+        "criterio_ativacao": "O cenário só será considerado ATIVO e aplicável se o atleta atender rigorosamente ao volume/nível estipulado na sua prescrição atual para a data.",
+        "estabilidade_ritmo_exigida": "Desvio padrão da frequência cardíaca baixo (indicação de ritmo constante e sem picos fora da Z2).",
+        "frequencia_semanal_sugerida": 2
       },
-      "patamar_retencao": {
-        "tempo_min_minutos": 45,
-        "tempo_max_minutos": 60,
-        "descricao": "Fase de consolidação capilar e base aeróbica básica."
-      },
-      "faixas_progressao": [
+      "regras_de_execucao_e_progressao_por_nivel": [
         {
           "nivel": 1,
-          "tempo_min_minutos": 65,
-          "tempo_max_minutos": 75,
-          "descricao": "Expansão celular inicial. Avaliar se o Efficiency Index se mantém estável mesmo com o aumento do tempo."
+          "volume_km": 7,
+          "tempo_min_minutos": 45,
+          "tempo_max_minutos": 60,
+          "intensidade": "Z2 85%",
+          "tempo_minimo_retencao_semanas": 10,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.06,
+            "criterio_ajustado": "Manter o Efficiency Index estável (zona 🔵 Ótimo ou acima) por pelo menos 4 sesões consecutivas neste volume, respeitando o tempo mínimo de retenção."
+          },
+          "descricao": "Expansão celular inicial. Consolidação capilar e base aeróbica básica."
         },
         {
           "nivel": 2,
-          "tempo_min_minutos": 76,
-          "tempo_max_minutos": 90,
-          "descricao": "Evolução intermediária de volume. O foco é manter o acoplamento cardiovascular sem subida da FC tardia."
+          "volume_km": 8,
+          "tempo_min_minutos": 52,
+          "tempo_max_minutos": 68,
+          "intensidade": "Z2 85%",
+          "tempo_minimo_retencao_semanas": 8,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.06,
+            "criterio_ajustado": "Manter o Efficiency Index estável (zona 🔵 Ótimo ou acima) por pelo menos 4 sessões consecutivas neste volume, comprovando acoplamento cardiovascular maduro."
+          },
+          "descricao": "Evolução intermediária de volume controlled. O foco principal passa a ser a sustentação da economia de corrida à medida que a distância começa a se estender."
         },
         {
           "nivel": 3,
-          "tempo_min_minutos": 91,
-          "tempo_max_minutos": 120,
-          "descricao": "Alto volume aeróbico (Rodagem Longa). O Efficiency Index aqui valida a real flexibilidade metabólica e endurance do atleta."
+          "volume_km": 9,
+          "tempo_min_minutos": 60,
+          "tempo_max_minutos": 78,
+          "intensidade": "Z2 85%",
+          "tempo_minimo_retencao_semanas": 8,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.08,
+            "criterio_ajustado": "Manter o Efficiency Index consolidado na zona 🔵 Ótimo ou acima por pelo menos 4 sessões consecutivas, validando a adaptação metabólica à extensão do tempo sob fadiga."
+          },
+          "descricao": "Maturação aeróbica avançada. O volume exige eficiência no fornecimento de energia por vias oxidativas puras, preparando o corpo para suportar o estresse metabólico prolongado."
         },
         {
           "nivel": 4,
-          "tempo_min_minutos": 121,
-          "tempo_max_minutos": 150,
-          "descricao": "Volume Avançado de Endurance Extrema. Avaliação crucial do desvio padrão da FC e degradação do ritmo (Pace Drift) em estado estável prolongado."
+          "volume_km": 10,
+          "tempo_min_minutos": 65,
+          "tempo_max_minutos": 85,
+          "intensidade": "Z2 85%",
+          "tempo_minimo_retencao_semanas": 6,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.08,
+            "criterio_ajustado": "Manter o Efficiency Index estável na zona 🔵 Ótimo ou acima por pelo menos 4 sessões consecutivas no teto padrão de rodagem de 10km."
+          },
+          "descricao": "Volume Avançado de Endurance Extrema. Avaliação crucial da economia de corrida e da degradação do ritmo (Pace Drift) em estado estável prolongado na distância alvo de 10km."
         },
         {
           "nivel": 5,
-          "tempo_min_minutos": 151,
-          "tempo_max_minutos": 180,
-          "descricao": "Teto Máximo de Rodagem de Longa Distância. Monitoramento estrito do Efficiency Index sob severa depleção de glicogênio e máxima dependência de oxidação lipídica."
+          "volume_km": 12,
+          "tempo_min_minutos": 80,
+          "tempo_max_minutos": 105,
+          "intensidade": "Z2 85%",
+          "tempo_minimo_retencao_semanas": 6,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.1,
+            "criterio_ajustado": "Sustentar o nível máximo (zona 🟢 Excelente) de forma consistente por pelo menos 4 sessões consecutivas neste volume extremo antes de liberar a transição de ciclo."
+          },
+          "descricao": "Teto Máximo de Rodagem de Longa Distância e Sobrecarga Aeróbica Semanal. Monitoramento estrito do custo cardiovascular sob severa depleção de glicogênio e máxima dependência de oxidação lipídica."
         }
       ],
       "legendas_eficiencia": {
-        "regular": "🔴 < 1,00 | Regular (Abaixo da Média): Indica que o custo cardiovascular foi proporcionalmente alto para a rodagem de terça-feira. Alerta para fadiga acumulada do final de semana, interferência climática ou ritmo excessivo que violou o propósito regenerativo do dia.",
-        "bom": "🟡 1,00 a 1,05 | Bom / Estável: Mostra que o treino curto/médio cumpriu perfeitamente o papel homeostático na Zona 2. É o seu padrão consolidado de base aeróbica saudável, limpando resíduos sem agredir o organismo.",
-        "otimo": "🔵 1,06 a 1,10 | Ótimo / Eficiente: Indica excelente economia de corrida no volume de terça-feira. Seu coração trabalhou folgado (baixos batimentos) mesmo mantendo um ritmo constante, sinalizando excelente adaptação cardiovascular.",
-        "excelente": "🟢 > 1,10 | Excelente / Altamente Otimizado: Seu pico máximo de eficiência para treinos curtos/médios. O corpo gastou o mínimo de energia celular para entregar a velocidade, comprovando que a biogênese mitocondrial está no topo e você está totalmente recuperado."
+        "regular": "🔴 < 1,00 | Regular (Abaixo da Média): Indica que o custo cardiovascular foi proporcionalmente alto. Alerta para fadiga acumulada, interferência climática ou ritmo excessivo.",
+        "bom": "🟡 1,00 a 1,05 | Bom / Estável: Cumpriu perfeitamente o papel homeostático na Zona 2. É o seu padrão de base aeróbica saudável.",
+        "otimo": "🔵 1,06 a 1,10 | Ótimo / Eficiente: Excelente economia de corrida. Coração trabalhou folgado mesmo mantendo o ritmo constante.",
+        "excelente": "🟢 > 1,10 | Excelente / Altamente Otimizado: Corpo gastou o mínimo de energia celular, comprovando que a biogênese mitocondrial está no topo."
       },
       "diagnosticos_clinicos": [
-        "Execução perfeita alinhada a San-Millán & Brooks (2017) e Stephen Seiler (2010). Sua intensidade de esforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM), mantendo os batimentos perfeitamente regulados na Zona 2 (124-138 bpm). A análise do seu 'efficiency_index' nesta sessão confirma que a relação velocidade/frequência cardíaca foi altamente favorável. Esse estresse volumétrico controlado ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial saudável nas fibras musculares Tipo I, otimizando a sua flexibilidade metabólica e garantindo a recuperação ideal para os stimuli de alta intensidade da semana."
-      ]
+        {
+          "referencia_cientifica": "San-Millán & Brooks (2017) e Stephen Seiler (2010)",
+          "detalhe": "Execução perfeita alinhada às referências. Sua intensidade de esoforço permitiu a oxidação máxima de lipídios (FATmax) com níveis estáveis de lactato sanguíneo (estimados entre 1.3 mM e 1.8 mM), mantendo os batimentos perfeitamente regulados na Zona 2 (124-138 bpm). A análise do seu 'efficiency_index' nesta sessão confirma que a relação velocidade/frequência cardíaca foi altamente favorável. Esse estresse volumétrico controlled ativou o co-transcritor PGC-1alpha, desencadeando a biogênese mitocondrial saudável nas fibras musculares Tipo I, otimizando a sua flexibilidade metabólica e garantindo a recuperação ideal para os stimuli de alta intensidade da semana."
+        }
+      ],
+      "diretrizes_recuperacao": {
+        "nutricao_pos_treino": {
+          "carboidratos": {
+            "tipo": "Carboidratos Complexos",
+            "objetivo": "Reposição gradual e sustentada dos estoques de glicogênio muscular.",
+            "sugestoes": ["Batata-doce", "Mandioca", "Arroz integral", "Pão integral caseiro"]
+          },
+          "proteinas": {
+            "tipo": "Proteínas Moderadas",
+            "objetivo": "Manutenção muscular de rotina e suporte à síntese proteica estrutural.",
+            "sugestoes": ["Queijo branco", "Ovos", "Carnes magras"]
+          },
+          "hidratacao_e_eletrolitos": {
+            "foco": "Hidratação basal com água mineral e reposição leve com água de coco para suprir perdas de potássio."
+          }
+        },
+        "descanso_inter_treinos": {
+          "janela_critica_4h": "Repouso total de esforços físicos nas primeiras 4 horas pós-treino, garantindo que o muscle retorne ao equilíbrio basal de forma eficiente.",
+          "dias_de_transicao": "Permitido realizar rodagens regenerativas leves (Zona 1/2) com menos de 30 minutos no dia seguinte, auxiliando na circulação e remoção de resíduos sem interromper a reconstrução celular."
+        }
+      }
+    },
+    {
+      "_id": { "$oid": "6a4ff94443c3c4618a162857" },
+      "cenarioId": 2,
+      "titulo": "CENÁRIO 2: INTENSIDADE – CAPACIDADE ANAERÓBICA – TREINO DE TIROS INTERVAlADO",
+      "zona_alvo_esforco": "Z4/Z5 ou Ritmo de Tiro Sub-4:30",
+      "regra_aplicabilidade": {
+        "criterio_ativacao": "O cenário só será considerado ATIVO e aplicável se o treino ocorrer às quintas-feiras e contiver blocos repetitivos de alta intensidade intercalados com períodos fixos de recuperação passiva ou ativa.",
+        "frequencia_semanal_sugerida": 1
+      },
+      "regras_de_execucao_e_progressao_por_nivel": [
+        {
+          "nivel": 1,
+          "descricao_estrutura": "Aquecimento 15 min + 8x [1:00 Corrente Forte / 1:30 Recuperação] + Desaquecimento",
+          "volume_total_estimado_km": 5.8,
+          "tempo_esforco_tiro": "1:00 minuto",
+          "tempo_recuperacao": "1:30 minuto",
+          "repeticoes": 8,
+          "tempo_minimo_retencao_semanas": 6,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.05,
+            "criterio_ajustado": "Manter o Efficiency Index estável (zona 🔵 Ótimo ou acima) por pelo menos 4 sessões consecutivas mantendo o teto dos tiros consistentemente abaixo de 4:10/km."
+          },
+          "descricao": "Fase de adaptação neuromuscular e recrutamento de fibras de contração rápida (Tipo II). Foco em consistência mecânica e tolerância inicial ao lactato."
+        },
+        {
+          "nivel": 2,
+          "descricao_estrutura": "Aquecimento 15 min + 10x [1:00 Corrente Forte / 1:30 Recuperação] + Desaquecimento",
+          "volume_total_estimado_km": 6.5,
+          "tempo_esforco_tiro": "1:00 minuto",
+          "tempo_recuperacao": "1:30 minuto",
+          "repeticoes": 10,
+          "tempo_minimo_retencao_semanas": 6,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.05,
+            "criterio_ajustado": "Sustentar a eficiência técnica e o pace alvo estável in 10 repetições por pelo menos 4 sessões consecutivas antes do avanço de densidade."
+          },
+          "descricao": "Expansão de volume anaeróbico. Aumento do estresse metabólico pelo acréscimo de repetições mantendo a mesma janela de descanso."
+        },
+        {
+          "nivel": 3,
+          "descricao_estrutura": "Aquecimento 15 min + 10x [1:00 Corrente Forte / 1:15 Recuperação] + Desaquecimento",
+          "volume_total_estimado_km": 6.3,
+          "tempo_esforco_tiro": "1:00 minuto",
+          "tempo_recuperacao": "1:15 minuto",
+          "repeticoes": 10,
+          "tempo_minimo_retencao_semanas": 6,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.06,
+            "criterio_ajustado": "Manter o Efficiency Index consolidado por pelo menos 4 sessões consecutivas operando sob menor tempo de remoção de lactato."
+          },
+          "descricao": "Aumento de densidade (redução do tempo de descanso). Força o organismo a iniciar o próximo tiro com remoção parcial de subprodutos metabólicos, elevando a eficiência de tamponamento."
+        },
+        {
+          "nivel": 4,
+          "descricao_estrutura": "Aquecimento 15 min + 12x [1:00 Corrente Forte / 1:15 Recuperação] + Desaquecimento",
+          "volume_total_estimado_km": 7,
+          "tempo_esforco_tiro": "1:00 minuto",
+          "tempo_recuperacao": "1:15 minuto",
+          "repeticoes": 12,
+          "tempo_minimo_retencao_semanas": 8,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.06,
+            "criterio_ajustado": "Manter a consistência em 12 tiros por pelo menos 4 sessões consecutivas com degradação mínima de ritmo nos tiros finais."
+          },
+          "descricao": "Volume Avançado de Capacidade Anaeróbica. O foco passa a ser a resiliência mecânica e psicológica mantendo paces agressivos sob forte acúmulo de fadiga periférica."
+        },
+        {
+          "nivel": 5,
+          "descricao_estrutura": "Aquecimento 15 min + 12x [1:00 Corrente Forte / 1:00 Recuperação] + Desaquecimento",
+          "volume_total_estimado_km": 6.8,
+          "tempo_esforco_tiro": "1:00 minuto",
+          "tempo_recuperacao": "1:00 minuto",
+          "repeticoes": 12,
+          "tempo_minimo_retencao_semanas": 8,
+          "gatilho_promocao_proximo_nivel": {
+            "metric_alvo": "efficiency_index",
+            "operador": "GREATER_THAN_OR_EQUAL",
+            "valor_estavel": 1.08,
+            "criterio_ajustado": "Sustentar nível máximo (zona 🟢 Excelente) por pelo menos 4 sessões na proporção 1:1 de esforço/pausa antes da transição de ciclo macro."
+          },
+          "descricao": "Teto Máximo de Potência e Densidade Anaeróbica. Proporção perfeita de 1:1 entre esforço e pausa, simulando a máxima exigência de ritmo de prova e potência aeróbica/anaeróbica integrada."
+        }
+      ],
+      "legendas_eficiencia": {
+        "regular": "🔴 < 1,00 | Regular (Abaixo da Média): Indica perda severa de ritmo nos tiros finais ou custo cardiovascular excessivamente alto devido a descanso incompleto ou fadiga sistêmica.",
+        "bom": "🟡 1,00 a 1,04 | Bom / Estável: Treino executado dentro da meta programada. Boa manutenção do pace médio dos tiros com recuperação cardíaca respondendo dentro do esperado.",
+        "otimo": "🔵 1.05 a 1.07 | Ótimo / Eficiente: Excelente economia de corrida nos tiros. Conseguiu entregar velocidades altas com menor estresse cardiovascular relativo e recuperação veloz na pausa.",
+        "excelente": "🟢 > 1,07 | Excelente / Altamente Otimizado: Ritmo espetacular e mecânica de corrida impecável. O coração respondeu limpando os resíduos rapidamente na pausa, indicando altíssimo nível de condicionamento anaeróbico."
+      },
+      "diagnosticos_clinicos": [
+        {
+          "referencia_cientifica": "Stephen Seiler (2010) - Modelo Polarizado e Via NOX2",
+          "detalhe": "Execução de alta intensidade cirúrgica. Os estímulos curtos de alta velocidade recrutaram com eficácia as unidades motoras de alta fadigabilidade (fibras Tipo IIx), gerando estímulo ótimo na via glicolítica. A manutenção de paces sub-4:00 estimula a sinalização de cálcio celular e ativa caminhos adaptativos complementares à Zona 2. De acordo com a fisiologia moderna, esse estresse agudo e controlado impulsiona o teto de VO2 máx e a tolerância ao lactato, enquanto as sessões de Z2 nas terças e sábados atuam limpando os subprodutos gerados por essa sessão de tiros de quinta-feira."
+        }
+      ],
+      "diretrizes_recuperacao": {
+        "nutricao_pos_treino": {
+          "carboidratos": {
+            "tipo": "Carboidratos de Rápida Absorção",
+            "objective": "Essencial nas primeiras 2 horas pós-esforço para aproveitar a janela metabólica da Hexokinase II ativa.",
+            "sugestoes": ["Suco de uva integral", "Banana com mel e aveia", "Arroz branco", "Purê de batata na refeição principal"]
+          },
+          "proteinas": {
+            "tipo": "Proteínas de Alta Qualidade",
+            "objective": "Reparação imediata das microlesões musculares induzidas pela acidose e aceleração da síntese proteica.",
+            "sugestoes": ["Ovos", "Frango grelhado", "Whey Protein"]
+          },
+          "estrategia_redox": {
+            "alerta_critico": "PROIBIDO prescrever megadoses de vitaminas sintéticas (C e E) isoladas pós-treino para não anular o sinal oxidativo natural da via NOX2 que gera a adaptation hormética.",
+            "foco_nutricional": "Priorizar antioxidantes naturais vindos diretamente dos alimentos (frutas vermelhas, cacau 70%, café)."
+          },
+          "reposicao_eletrolitica": {
+            "objective": "Repor a alta perda de sódio, potássio e magnésio eliminados pelo suor em regimes de alta intensidade.",
+            "sugestoes": ["Isotônico caseiro (água, pitada de sal marinho, limão e mel)", "Água de coco", "Cápsulas de sal se o treino ultrapassar 1 hora"]
+          }
+        },
+        "custom_nutrition_reference_link": { "$ref": "nutrition_global_protocols" },
+        "descanso_inter_treinos": {
+          "janela_critica_4h": "Repouso físico total nas primeiras 4 horas pós-treino, permitindo que a célula limpe os radicais livres e inicie a homeostase.",
+          "janela_48h_biogenese": "Intervalo mínimo obrigatório de 48 horas (2 dias) entre treinos de tiros fortes. O músculo necessita deste tempo para concluir a fabricação de novas mitocôndrias e enzimas de defesa (SOD2/Catalase) disparadas pela via NOX2."
+        }
+      }
     }
-  ]
+  ],
+  "nutrition_global_protocols": {
+    "_id": { "$oid": "6a51071618474fcb0a337b67" },
+    "light_moderated_days": {
+      "focus": "Reposição gradual e oxidação de gorduras (FATmax)",
+      "pre_workout": "Carboidratos complexos de baixo/médio índice glicêmico (ex: batata-doce, mandioca ou pão integral) associados a uma fonte leve de proteína.",
+      "post_workout": "Carboidratos complexos para reposição gradual de glicogênio (ex: arroz integral ou mandioca) e proteínas moderadas para manutenção muscular de rotina (ex: ovos ou queijo branco).",
+      "hydration": "Foco em hidratação basal com água mineral e reposição leve com água de coco (rica em potássio)."
+    },
+    "high_intensity_days": {
+      "focus": "Aproveitamento da janela da Hexokinase II e suporte à via NOX2",
+      "pre_workout": "Carboidratos de fácil digestão para fornecimento rápido de energia sem desconforto gástrico.",
+      "post_workout": {
+        "critical_window_2h": "Carboidratos de rápida absorção para aproveitar a enzima Hexokinase II ativa (ex: suco de uva integral, banana com mel e aveia, ou purê de batata) combinados com proteínas de alta qualidade para reparação de microlesões (ex: ovos, frango grelhado ou Whey Protein).",
+        "redox_strategy": "Evitar megadoses de vitaminas sintéticas (C e E) isoladas para não anular o sinal oxidativo natural da via NOX2. Focar em antioxidantes vindos direto dos alimentos (ex: frutas vermelhas, cacau 70% ou café)."
+      },
+      "hydration_and_electrolytes": "Reposição agressiva devido à alta perda de sódio, potássio e magnésio pelo suor. Utilizar isotônico caseiro (água, pitada de sal marinho, limão e mel) ou água de coco."
+    }
+  },
+  "rest_global_protocols": {
+    "_id": { "$oid": "6a51073818474fcb0a337b69" },
+    "immediate_recovery": {
+      "critical_window_4h": "Repouso físico total nas primeiras 4 horas pós-treino. Período de estresse celular agudo onde o músculo limpa os radicais livres e retorna ao equilíbrio basal.",
+      "sleep_target": "7 a 8 horas de sono de qualidade por noite para regulação do ritmo circadiano e homeostase celular."
+    },
+    "inter_training_windows": {
+      "high_intensity_recovery": {
+        "required_hours": 48,
+        "justification": "O músculo necessita de até 48 horas para concluir a fabricação de novas mitocôndrias (biogênese via PGC-1alpha) e enzimas de defesa (SOD2 e Catalase) disparadas pela via NOX2. Intervalo mínimo de 2 dias entre treinos de tiro fortes."
+      },
+      "transition_days": {
+        "allowed_activity": "Rodagens regenerativas leves in Zona 1 ou Zona 2 com duração estritamente inferior a 30 minutos.",
+        "benefit": "Auxilia na circulação sanguínea e na remoção de resíduos metabólicos sem interromper a reconstrução celular profunda."
+      }
+    }
+  }
 }
+
+
 
 

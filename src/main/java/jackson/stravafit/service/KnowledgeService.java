@@ -1,39 +1,36 @@
 package jackson.stravafit.service;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ClassPathResource;
+import jackson.stravafit.model.ScenarioEntity;
+import jackson.stravafit.repository.ScenarioRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.util.List;
 
-@Slf4j
 @Service
+@RequiredArgsConstructor
 public class KnowledgeService {
 
-    private static final String SETTINGS_FILE = "studySettings.txt";
+    private final ScenarioRepository scenarioRepository;
 
-    /**
-     * Recupera o conteúdo científico diretamente do arquivo físico no projeto.
-     * Isso garante que a IA sempre tenha acesso aos dados, mesmo que o banco de dados falhe.
-     */
     public String getScientificContext() {
-        try {
-            log.debug("[KNOWLEDGE] Lendo contexto científico de: {}", SETTINGS_FILE);
-            ClassPathResource resource = new ClassPathResource(SETTINGS_FILE);
-
-            if (!resource.exists()) {
-                log.warn("[KNOWLEDGE] Arquivo {} não encontrado! Usando fallback genérico.", SETTINGS_FILE);
-                return "Utilize diretrizes gerais de Biogênese Mitocondrial.";
-            }
-
-            try (InputStream is = resource.getInputStream()) {
-                byte[] bytes = is.readAllBytes();
-                return new String(bytes, StandardCharsets.UTF_8);
-            }
-        } catch (Exception e) {
-            log.error("[KNOWLEDGE] Erro crítico ao ler o arquivo de configuração: {}", e.getMessage());
-            return "Erro ao carregar base científica.";
+        List<ScenarioEntity> scenarios = scenarioRepository.findAll();
+        if (scenarios.isEmpty()) {
+            return null;
         }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("--- BASE DE CONHECIMENTO (CENÁRIOS DO MONGODB) ---\n\n");
+
+        for (ScenarioEntity scenario : scenarios) {
+            sb.append("CENÁRIO: ").append(scenario.getTitulo()).append("\n");
+            sb.append("DIAGNÓSTICO: ").append(scenario.getDiagnostico()).append("\n");
+            sb.append("ANÁLISE: ").append(scenario.getAnalise()).append("\n");
+            sb.append("CONCLUSÃO: ").append(scenario.getConclusao()).append("\n");
+            sb.append("REPOSIÇÃO: ").append(scenario.getReposicao()).append("\n");
+            sb.append("PRÓXIMO TREINO: ").append(scenario.getProximoTreino()).append("\n\n");
+        }
+
+        return sb.toString();
     }
 }
