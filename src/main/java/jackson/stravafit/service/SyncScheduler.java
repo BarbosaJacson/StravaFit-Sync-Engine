@@ -40,7 +40,7 @@ public class SyncScheduler {
     @EventListener(ApplicationReadyEvent.class)
     public void syncOnStartup() {
         log.info("[STARTUP] Iniciando motor e verificando pendências...");
-        boolean novoProcessado = executarSincronizacao(this.accessToken);
+        boolean novoProcessado = executarSincronizacao();
         
         if (!novoProcessado) {
             log.info("[STARTUP] Nenhuma novidade no Strava. Enviando lembrete do último treino analisado.");
@@ -48,63 +48,52 @@ public class SyncScheduler {
         }
     }
 
-    // Agendamento principal: Ter, Qui, Sab (Horários de treino)
     @Scheduled(cron = "0 0,30 7,8 * * TUE,THU,SAT")
     public void scheduledSync() {
         log.info("\n=== [AGENDAMENTO AUTOMÁTICO DISPARADO - PÓS-TREINO] ===");
-        executarSincronizacao(this.accessToken);
+        executarSincronizacao();
     }
 
-    // NOVO AGENDAMENTO: Ter, Qui, Sab às 05:05 (Checagem de Sono e Plano Pré-Treino)
     @Scheduled(cron = "0 5 5 * * TUE,THU,SAT")
     public void scheduledSleepCheck() {
         log.info("\n=== [AGENDAMENTO AUTOMÁTICO DISPARADO - PRÉ-TREINO] ===");
         log.info("   [SONO] Avaliando qualidade do sono para o treino de hoje...");
         
-        String sleepQuality = simulateSleepQuality(); // Simula a qualidade do sono
+        String sleepQuality = simulateSleepQuality();
         String preWorkoutRecommendation = insightService.getPreWorkoutRecommendation(sleepQuality);
         
         telegramClient.sendMessage("AVALIAÇÃO PRÉ-TREINO (" + LocalDate.now() + "):\n\n" + preWorkoutRecommendation);
         log.info("   [TELEGRAM] Recomendação pré-treino enviada com base no sono.");
     }
 
-    // TAREFA DE RECUPERAÇÃO: Tenta "curar" atividades sem insight a cada 1 hora
     @Scheduled(cron = "0 0 * * * *")
     public void recoveryTask() {
         log.info("   [RECOVERY] Verificando se há treinos pendentes de análise...");
         garantirEEnviarUltimoInsight();
     }
 
-    private boolean executarSincronizacao(String tokenParaUsar) {
+    public boolean executarSincronizacao() {
         try {
-            ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(tokenParaUsar, 1);
+            ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(this.accessToken, 1);
             if (response.activities().isEmpty()) {
                 log.warn("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
                 return false;
             }
 
             StravaActivity activity = response.activities().get(0);
-            LocalDate activityDate = ZonedDateTime.parse(activity.getStartDateLocal()).toLocalDate();
-            LocalDate today = LocalDate.now();
-
-            if (!activityDate.isEqual(today)) {
-                log.info("-> Última atividade (" + activity.getName() + ") não é do dia vigente. Enviando mensagem de reprogramação.");
-                telegramClient.sendMessage("ATENÇÃO: Não foi detectado treino no Strava para o dia " + today + ".\n\nPor favor, reprograme seu treino ou registre-o no Strava para análise.");
-                return false;
-            }
-
+            
             if (activityRepository.existsById(activity.getId())) {
                 log.info("-> Treino do dia (" + activity.getName() + ") já analisado. Sistema atualizado.");
                 return false;
             }
 
-            log.info("-> NOVO TREINO DETECTADO PARA O DIA: " + activity.getName());
-            processarEEnviar(tokenParaUsar, activity);
+            log.info("-> NOVO TREINO DETECTADO: " + activity.getName());
+            processarEEnviar(this.accessToken, activity);
             return true;
 
         } catch (HttpClientErrorException.Unauthorized e) {
             if (renovarToken()) {
-                return executarSincronizacao(this.accessToken);
+                return executarSincronizacao();
             } else {
                 log.error("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
                 return false;
@@ -117,20 +106,19 @@ public class SyncScheduler {
 
     private void processarEEnviar(String token, StravaActivity activity) {
         try {
-            List<StravaActivity.HeartRateZone> zones = activityService.getActivityZones(token, activity.getId());
             List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.getId());
-            List<Double> hrData = activityService.getHeartRateStream(streams);
-            String zonaDominante = activityService.calculateDominantZoneSummary(hrData);
-            List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, zones);
+            List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, null);
             
-            String insight = insightService.getActivityInsight(activity, minuteAnalysis);
+            String insight = insightService.getActivityInsight(activity, minuteAnalysis, streams);
             
             if (isValidInsight(insight)) {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
+                String zonaDominante = activityService.calculateDominantZoneSummary(activityService.getHeartRateStream(streams));
                 activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
             } else {
+                log.warn("   [GEMINI] Falha temporária. Atividade será salva sem insight para análise posterior.");
+                String zonaDominante = activityService.calculateDominantZoneSummary(activityService.getHeartRateStream(streams));
                 activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
-                log.warn("   [GEMINI] Falha temporária. Atividade salva para análise posterior.");
             }
         } catch (Exception e) {
             log.error("Erro ao processar e enviar atividade {}: {}", activity.getId(), e.getMessage());
@@ -143,12 +131,13 @@ public class SyncScheduler {
             
             if (!isValidInsight(insight)) {
                 log.info("   [GEMINI] Tentando gerar análise para: " + activity.getName());
-                insight = insightService.getActivityInsightFromEntity(activity);
+                // Passamos 'null' para os streams, pois não os temos aqui. O InsightService usará o fallback.
+                String newInsight = insightService.getActivityInsightFromEntity(activity);
                 
-                if (isValidInsight(insight)) {
-                    activity.setGeminiInsight(insight);
+                if (isValidInsight(newInsight)) {
+                    activity.setGeminiInsight(newInsight);
                     activityRepository.save(activity);
-                    telegramClient.sendMessage("FEEDBACK DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + insight);
+                    telegramClient.sendMessage("FEEDBACK DO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + newInsight);
                     log.info("   [TELEGRAM] Insight pendente enviado com sucesso.");
                 } else {
                     log.warn("   [GEMINI] Falha na tentativa de recuperação. Tentaremos novamente em breve.");

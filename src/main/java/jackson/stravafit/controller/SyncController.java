@@ -3,26 +3,26 @@ package jackson.stravafit.controller;
 import jackson.stravafit.service.SyncScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/sync")
+@RequestMapping("/api")
 @RequiredArgsConstructor
 public class SyncController {
 
     private final SyncScheduler syncScheduler;
 
-    /**
-     * Endpoint para disparar a sincronização manualmente via URL.
-     * Útil para testes no Google Cloud.
-     */
-    @GetMapping("/trigger")
+    @PostMapping("/sync")
     public ResponseEntity<String> triggerSync() {
-        System.out.println("   [MANUAL] Gatilho de sincronização acionado via API.");
-        // Usamos o token atual da classe (o scheduler cuidará da renovação se necessário)
-        syncScheduler.scheduledSync();
-        return ResponseEntity.ok("Sincronização disparada com sucesso! Verifique os logs e o Telegram.");
+        // A lógica de execução será movida para o SyncScheduler
+        // para manter a organização.
+        boolean success = syncScheduler.executarSincronizacao();
+        if (success) {
+            return ResponseEntity.ok("Sincronização executada com sucesso.");
+        } else {
+            return ResponseEntity.status(500).body("Falha na sincronização.");
+        }
     }
 }
