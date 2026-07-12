@@ -109,7 +109,8 @@ public class SyncScheduler {
             List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.getId());
             List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, null);
             
-            String insight = insightService.getActivityInsight(activity, minuteAnalysis, streams);
+            // CORREÇÃO: Remove o terceiro argumento 'streams'
+            String insight = insightService.getActivityInsight(activity, minuteAnalysis);
             
             if (isValidInsight(insight)) {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
@@ -131,7 +132,6 @@ public class SyncScheduler {
             
             if (!isValidInsight(insight)) {
                 log.info("   [GEMINI] Tentando gerar análise para: " + activity.getName());
-                // Passamos 'null' para os streams, pois não os temos aqui. O InsightService usará o fallback.
                 String newInsight = insightService.getActivityInsightFromEntity(activity);
                 
                 if (isValidInsight(newInsight)) {
