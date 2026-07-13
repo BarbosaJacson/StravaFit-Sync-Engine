@@ -17,7 +17,7 @@ public class StravaWebhookController {
 
     private final SyncScheduler syncScheduler;
 
-    @Value("${strava.webhook.verify-token}") // Removido o valor padrão para forçar a definição via ambiente
+    @Value("${strava.webhook.verify-token}")
     private String verifyToken;
 
     /**
@@ -54,7 +54,9 @@ public class StravaWebhookController {
 
         if ("activity".equals(objectType) && "create".equals(aspectType)) {
             log.info("[WEBHOOK] Nova atividade detectada (ID: {})! Disparando sincronização...", objectId);
-            syncScheduler.scheduledSync();
+
+            // ✨ CORREÇÃO CIRÚRGICA: Alinhando com o novo método reativo
+            syncScheduler.executarSincronizacao();
         }
 
         return ResponseEntity.ok().build();

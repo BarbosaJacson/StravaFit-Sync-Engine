@@ -26,13 +26,13 @@ public class DebugController {
     @GetMapping("/force-sync")
     public ResponseEntity<Map<String, String>> forceSync() {
         log.info("[DEBUG] Gatilho manual disparado para sincronização geral.");
-        
-        // Chamamos o método que já faz a lógica de verificar treinos novos ou pendentes
-        syncScheduler.scheduledSync();
-        
+
+        // ✨ CORREÇÃO: Alinhado com o novo método único do SyncScheduler
+        syncScheduler.executarSincronizacao();
+
         return ResponseEntity.ok(Map.of(
-            "status", "Sincronização disparada",
-            "message", "Verifique os logs do Cloud Run e o seu Telegram."
+                "status", "Sincronização disparada",
+                "message", "Verifique os logs do Cloud Run e o seu Telegram."
         ));
     }
 
