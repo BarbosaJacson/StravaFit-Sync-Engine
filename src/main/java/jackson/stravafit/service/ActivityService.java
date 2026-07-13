@@ -15,6 +15,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -124,7 +126,17 @@ public class ActivityService {
 
         if (zoneCounts.isEmpty()) return "N/A";
 
-        int dominantZone = Collections.max(zoneCounts.entrySet(), Map.Entry.comparingByValue()).getKey();
+        // 👑 Ajustado: Calcula a zona predominante corrigindo empates (prioriza maior intensidade)
+        int dominantZone = zoneCounts.entrySet().stream()
+                .max((entry1, entry2) -> {
+                    int compare = entry1.getValue().compareTo(entry2.getValue());
+                    if (compare == 0) {
+                        return entry1.getKey().compareTo(entry2.getKey()); // Se empatar em minutos, escolhe a zona mais alta (Z3 > Z2)
+                    }
+                    return compare;
+                })
+                .map(Map.Entry::getKey).orElse(0);
+
         double percentage = (zoneCounts.get(dominantZone) * 100.0) / hrData.size();
 
         return String.format("Z%d (%.1f%%)", dominantZone, percentage);
@@ -148,19 +160,69 @@ public class ActivityService {
         return data.subList(start, actualEnd).stream().mapToDouble(d -> d).average().orElse(0.0);
     }
 
-    private int calculateKarvonenZone(double bpm) {
-        int hrReserve = athleteConfig.getHrMax() - athleteConfig.getHrResting();
+    public int calculateKarvonenZone(double bpm) {
+        int hrMax = athleteConfig.getHrMax();
+        int hrResting = athleteConfig.getHrResting();
+        int hrReserve = hrMax - hrResting;
         if (hrReserve <= 0) return 0;
 
-        double intensity = (bpm - athleteConfig.getHrResting()) / hrReserve;
+        // 1. Arredonda o BPM atual para o inteiro mais próximo
+        int bpmInt = (int) Math.round(bpm);
 
-        if (intensity >= 0.90) return 5; // Z5: 90-100%
-        if (intensity >= 0.80) return 4; // Z4: 80-90%
-        if (intensity >= 0.70) return 3; // Z3: 70-80%
-        if (intensity >= 0.60) return 2; // Z2: 60-70%
-        if (intensity >= 0.50) return 1; // Z1: 50-60%
-        
-        return 0; // Abaixo de Z1
+        // 2. Calcula os limites exatos em BPM baseados na sua FCR (120 bpm)
+        int z1Min = hrResting + (int) Math.round(0.50 * hrReserve); // 53 + 60 = 113 bpm
+        int z1Max = hrResting + (int) Math.round(0.59 * hrReserve); // 53 + 71 = 124 bpm
+
+        int z2Min = z1Max + 1;                                      // 125 bpm
+        int z2Max = hrResting + (int) Math.round(0.72 * hrReserve); // 53 + 86 = 139 bpm (Se quiser estender ao limiar físico de 140, usamos 140)
+
+        // Garantimos a continuidade perfeita somando +1 para a próxima zona
+        int cinzaMin = z2Max + 1;                                   // 140 bpm
+        int cinzaMax = hrResting + (int) Math.round(0.79 * hrReserve); // 53 + 95 = 148 bpm
+
+        int z34Min = cinzaMax + 1;                                  // 149 bpm
+        int z34Max = hrResting + (int) Math.round(0.89 * hrReserve); // 53 + 107 = 160 bpm
+
+        int z5Min = z34Max + 1;                                     // 161 bpm
+
+        // 3. Classificação contínua e sem frestas
+        if (bpmInt < z1Min) {
+            return 0; // Fora das zonas (Z0)
+        }
+        if (bpmInt <= z1Max) {
+            return 1; // Zona 1 (113 a 124 bpm)
+        }
+        if (bpmInt <= z2Max) {
+            return 2; // Zona 2 (125 a 139 bpm ou 140 bpm dependendo do teto)
+        }
+        if (bpmInt <= cinzaMax) {
+            return 0; // Zona Cinzenta (140 a 148 bpm) -> Não pontua nas zonas alvo
+        }
+        if (bpmInt <= z34Max) {
+            return 3; // Zona 3/4 (149 a 160 bpm)
+        }
+
+        return 5; // Zona 5 (161 bpm para cima)
+    }
+
+    public Map<Integer, Double> calculateZonePercentages(List<Double> hrData) {
+        if (hrData == null || hrData.isEmpty()) return Map.of();
+
+        Map<Integer, Long> zoneCounts = hrData.stream()
+                .map(this::calculateKarvonenZone)
+                .filter(z -> z > 0)
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+
+        long totalMinutos = hrData.size();
+
+        Map<Integer, Double> percentages = new HashMap<>();
+        for (int z = 1; z <= 5; z++) {
+            long count = zoneCounts.getOrDefault(z, 0L);
+            double pct = (count * 100.0) / totalMinutos;
+            percentages.put(z, pct);
+        }
+
+        return percentages;
     }
 
     public record ActivityPageResponse(

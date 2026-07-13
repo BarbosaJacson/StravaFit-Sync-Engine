@@ -39,6 +39,7 @@ public class InsightService {
     private final GeminiClient geminiClient;
     private final ActivityRepository activityRepository;
     private final WorkoutPrescriptionRepository workoutPrescriptionRepository;
+    private final ActivityService activityService;
     private final ActivitySummaryRepository activitySummaryRepository;
     private final KnowledgeService knowledgeService;
     private final InsightService self;
@@ -53,7 +54,7 @@ public class InsightService {
     public InsightService(GeminiClient geminiClient,
                           ActivityRepository activityRepository,
                           WorkoutPrescriptionRepository workoutPrescriptionRepository,
-                          ActivitySummaryRepository activitySummaryRepository,
+                          ActivitySummaryRepository activitySummaryRepository, ActivityService activityService,
                           @Lazy InsightService self,
                           KnowledgeService knowledgeService,
                           @Value("${atleta.hr-max:173}") int hrMaxConfig,
@@ -63,6 +64,7 @@ public class InsightService {
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
         this.activitySummaryRepository = activitySummaryRepository;
+        this.activityService = activityService;
         this.self = self;
         this.knowledgeService = knowledgeService;
         this.hrMaxConfig = hrMaxConfig;
@@ -70,22 +72,6 @@ public class InsightService {
         this.nomeAtleta = nomeAtleta;
     }
 
-    public String getPreWorkoutRecommendation(String sleepQuality) {
-        String prompt = """
-            --- INSTRUÇÃO DE FORMATAÇÃO: O RETORNO DEVE SER COESO, ORGANIZADO E BEM FORMATADO, UTILIZANDO TÍTULOS E SUBTÍTULOS EM LETRAS MAIÚSCULAS. NÃO USE ASTERISCOS OU OUTROS SÍMBOLOS DE MARKDOWN. ---
-
-            AVALIAÇÃO PRÉ-TREINO: CONDIÇÕES FISIOLÓGICAS
-
-            SITUAÇÃO DO SONO: %S
-
-            TAREFA:
-            Como um Especialista em Fisiologia, avalie esta qualidade de sono para um atleta que tem um treino de Zona 2 programado para hoje as 05:30 da manhã.
-            Se o sono foi ruim ou muito ruim, sugira uma adaptação (redução de volume ou intensidade, ou até mesmo descanso total). Se o sono foi bom, reforce o plano.
-            Forneça uma recomendação curta, direta e técnica.
-            """.formatted(sleepQuality.toUpperCase());
-        
-        return geminiClient.getInsight(prompt);
-    }
 
     @Transactional
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
@@ -98,29 +84,13 @@ public class InsightService {
                 analysis);
     }
 
-    @Transactional
-    public String getActivityInsightFromEntity(ActivityEntity entity) {
-        if (entity.getMinuteDetails() == null || entity.getMinuteDetails().isEmpty()) {
-            return "Erro: Dados de telemetria insuficientes para gerar análise.";
-        }
-
-        List<StravaActivity.MinuteAnalysis> analysis = entity.getMinuteDetails().stream()
-                .map(m -> new StravaActivity.MinuteAnalysis(m.getMinute(), m.getAverageHeartRate(), m.getMaxHeartRate(), m.getZone(), m.getAverageElevation(), m.getAverageCadence()))
-                .toList();
-
-        Double averageSpeed = (entity.getDistanceKm() != null && entity.getTotalTimeMinutes() != null && entity.getTotalTimeMinutes() > 0) ?
-                entity.getDistanceKm() / (entity.getTotalTimeMinutes() / 60.0) : null;
-
-        return generateInsight(entity.getId(), entity.getName(), entity.getDistanceKm(), entity.getStartDate(), averageSpeed, analysis);
-    }
-
     private String generateInsight(Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
         String proximoTreinoData = calcularProximaDataTreino(activityDate);
         SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed);
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior = workoutPrescriptionRepository.findTopByScheduledDateOrderByCreatedAtDesc(activityDate.toLocalDate());
 
-        String prompt = buildProfessionalPrompt(name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null));
+        String prompt = buildProfessionalPrompt(name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null), analysis);
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
 
@@ -184,7 +154,7 @@ public class InsightService {
         }
     }
 
-    private String buildProfessionalPrompt(String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData, WorkoutPrescriptionEntity prescricaoAnterior) {
+    private String buildProfessionalPrompt(String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData, WorkoutPrescriptionEntity prescricaoAnterior, List<StravaActivity.MinuteAnalysis> analysis) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext();
         List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
@@ -219,7 +189,60 @@ public class InsightService {
         sb.append("⚡ Intensidade do Estímulo: [ANALISE O DESVIO PADRÃO DA FC (").append(String.format("%.1f", metrics.stdDev())).append(" bpm) E O PICO DE FC (").append(String.format("%.0f%%", metrics.fcMaxPercentage())).append(" da FC Máx) PARA CLASSIFICAR A INTENSIDADE.]\n\n");
         
         sb.append("📊 Métricas: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
-        
+
+        sb.append("📊 Distribuição de Esforço por Zona Cardíaca:\n");
+
+        // 🔄 Descobre dinamicamente os limites de BPM chamando o método público do ActivityService para cada zona
+        java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
+        java.util.Map<Integer, Integer> maxBpms = new java.util.HashMap<>();
+
+        // Percorre todos os BPMs possíveis para mapear onde cada zona realmente começa e termina
+        for (int bpm = hrResting; bpm <= hrMaxConfig; bpm++) {
+            int z = activityService.calculateKarvonenZone(bpm);
+            if (z > 0) {
+                minBpms.putIfAbsent(z, bpm);
+                maxBpms.put(z, bpm); // Atualiza constantemente até achar o teto da zona
+            }
+        }
+
+        // Busca as porcentagens calculadas unicamente pelo ActivityService
+        List<Double> hrData = analysis.stream()
+                .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
+                .filter(Objects::nonNull)
+                .toList();
+        Map<Integer, Double> zonePercentages = activityService.calculateZonePercentages(hrData);
+
+        // Renderiza cada zona com seus limites exatos baseados na regra de negócio
+        for (int zona = 1; zona <= 5; zona++) {
+            double pct = zonePercentages.getOrDefault(zona, 0.0);
+            int bpmMin = minBpms.getOrDefault(zona, 0);
+            int bpmMax = maxBpms.getOrDefault(zona, 0);
+
+            // Se os limites não foram encontrados (zona vazia), exibe os teóricos aproximados
+            if (bpmMin == 0 || bpmMax == 0) {
+                int hrr = hrMaxConfig - hrResting;
+                switch (zona) {
+                    case 1 -> { bpmMin = (int) (hrResting + (0.50 * hrr)); bpmMax = (int) (hrResting + (0.60 * hrr)) - 1; }
+                    case 2 -> { bpmMin = (int) (hrResting + (0.60 * hrr)); bpmMax = (int) (hrResting + (0.70 * hrr)) - 1; }
+                    case 3 -> { bpmMin = (int) (hrResting + (0.70 * hrr)); bpmMax = (int) (hrResting + (0.80 * hrr)) - 1; }
+                    case 4 -> { bpmMin = (int) (hrResting + (0.80 * hrr)); bpmMax = (int) (hrResting + (0.90 * hrr)) - 1; }
+                    case 5 -> { bpmMin = (int) (hrResting + (0.90 * hrr)); bpmMax = hrMaxConfig; }
+                }
+            }
+
+            String descricaoZona = switch (zona) {
+                case 1 -> String.format("Zona 1 (Ativa / Recuperação) [%d - %d bpm]", bpmMin, bpmMax);
+                case 2 -> String.format("Zona 2 (Aeróbica / FatMax) [%d - %d bpm]", bpmMin, bpmMax);
+                case 3 -> String.format("Zona 3 (Tempo / Ritmo) [%d - %d bpm]", bpmMin, bpmMax);
+                case 4 -> String.format("Zona 4 (Limiar Anaeróbico) [%d - %d bpm]", bpmMin, bpmMax);
+                case 5 -> String.format("Zona 5 (Capacidade Anaeróbica / Pico) [%d - %d bpm]", bpmMin, bpmMax);
+                default -> "Zona " + zona;
+            };
+
+            sb.append(String.format("  - %s: %.1f%%\n", descricaoZona, pct));
+        }
+        sb.append("\n");
+        sb.append("\n");
         if (prescricaoAnterior != null) {
             sb.append("📋 Referência (Treino Anterior Prescrito):\n");
             sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
@@ -267,31 +290,62 @@ public class InsightService {
         return sb.toString();
     }
 
-    public record SessionMetrics(double fcMedia, double fcMax, int duracao, double stdDev, int zonaPredominante, double z2Percent, String comportamento, double fcMaxPercentage, double vo2MaxEstimado, double ganhoAlt, double efficiencyIndex, double safeDistance, String paceFormatted) {}
+    public record SessionMetrics(double fcMedia, double fcMax, int duracao, double stdDev, int zonaPredominante, double z2Percent, String comportamento, double fcMaxPercentage, double vo2MaxEstimado, double ganhoAlt, double efficiencyIndex, double safeDistance, String paceFormatted, Map<Integer, Double> zonePercentages) {}
 
     private SessionMetrics calcularMetricasSessao(List<StravaActivity.MinuteAnalysis> analysis, Double distance, Double averageSpeed) {
         double fcMedia = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).average().orElse(0.0);
         double fcMax = analysis.stream().map(StravaActivity.MinuteAnalysis::getMaxHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).max().orElse(0.0);
         int duracao = analysis.size();
+
+
         double variance = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(m -> Math.pow(m - fcMedia, 2)).average().orElse(0.0);
         double stdDev = Math.sqrt(variance);
-        int zonaPredominante = analysis.stream().map(StravaActivity.MinuteAnalysis::getZone).filter(Objects::nonNull).collect(Collectors.groupingBy(Function.identity(), Collectors.counting())).entrySet().stream().max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse(0);
-        long z2Count = analysis.stream().map(StravaActivity.MinuteAnalysis::getZone).filter(z -> z != null && z == 2).count();
-        double z2Percent = (duracao > 0) ? (z2Count * 100.0) / duracao : 0.0;
+
+        // 📊 1. Mapeia a contagem exata de minutos por zona
+        Map<Integer, Long> zoneCounts = analysis.stream()
+                .map(StravaActivity.MinuteAnalysis::getZone)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+
+        // 📈 2. Calcula o percentual exato gasto em cada zona (Z1 a Z5)
+        Map<Integer, Double> zonePercentages = Map.of(
+                1, (duracao > 0) ? (zoneCounts.getOrDefault(1, 0L) * 100.0) / duracao : 0.0,
+                2, (duracao > 0) ? (zoneCounts.getOrDefault(2, 0L) * 100.0) / duracao : 0.0,
+                3, (duracao > 0) ? (zoneCounts.getOrDefault(3, 0L) * 100.0) / duracao : 0.0,
+                4, (duracao > 0) ? (zoneCounts.getOrDefault(4, 0L) * 100.0) / duracao : 0.0,
+                5, (duracao > 0) ? (zoneCounts.getOrDefault(5, 0L) * 100.0) / duracao : 0.0
+        );
+
+        // 👑 3. Calcula a Zona Predominante corrigindo empates (prioriza maior intensidade em caso de empate)
+        int zonaPredominante = zoneCounts.entrySet().stream()
+                .max((entry1, entry2) -> {
+                    int compare = entry1.getValue().compareTo(entry2.getValue());
+                    if (compare == 0) {
+                        return entry1.getKey().compareTo(entry2.getKey()); // Desempata pela zona mais alta (Z3 > Z2)
+                    }
+                    return compare;
+                })
+                .map(Map.Entry::getKey).orElse(0);
+
+        double z2Percent = zonePercentages.get(2);
+
         double firstHalf = analysis.stream().limit(duracao / 2).map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).average().orElse(fcMedia);
         double secondHalf = analysis.stream().skip(duracao / 2).map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).average().orElse(fcMedia);
         String comportamento = (secondHalf > firstHalf * 1.05) ? "subindo gradualmente (drift)" : "predominantemente estável";
+
         double fcMaxPercentage = (fcMax / hrMaxConfig) * 100;
         double vo2MaxEstimado = 15.3 * (fcMax / hrResting);
+
         DoubleSummaryStatistics elevStats = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageElevation).filter(Objects::nonNull).mapToDouble(Double::doubleValue).summaryStatistics();
         double ganhoAlt = elevStats.getMax() - elevStats.getMin();
         if (ganhoAlt < 0 || elevStats.getCount() == 0) ganhoAlt = 0.0;
+
         double safeDistance = distance != null ? distance : 0.0;
         double efficiencyIndex = (fcMedia > 0 && duracao > 0) ? (safeDistance * 1000.0) / (fcMedia * duracao) : 0.0;
         String paceFormatted = formatSpeedToPace(averageSpeed);
-        return new SessionMetrics(fcMedia, fcMax, duracao, stdDev, zonaPredominante, z2Percent, comportamento, fcMaxPercentage, vo2MaxEstimado, ganhoAlt, efficiencyIndex, safeDistance, paceFormatted);
-    }
 
+        return new SessionMetrics(fcMedia, fcMax, duracao, stdDev, zonaPredominante, z2Percent, comportamento, fcMaxPercentage, vo2MaxEstimado, ganhoAlt, efficiencyIndex, safeDistance, paceFormatted, zonePercentages);
+    }
     private String extractXmlBlock(String text, String blockName) {
         Pattern pattern = Pattern.compile("<" + blockName + ">(.*?)</" + blockName + ">", Pattern.DOTALL);
         Matcher matcher = pattern.matcher(text);
