@@ -6,6 +6,7 @@ import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.model.MinuteAnalysisEntity;
 import jackson.stravafit.repository.ActivityRepository;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,9 +27,7 @@ public class ActivityService {
     private final ActivityRepository activityRepository;
     private final AthleteConfig athleteConfig;
 
-    /**
-     * Recupera atividades do Strava e filtra apenas aquelas que possuem monitoramento de batimento cardíaco válido.
-     */
+
     public ActivityPageResponse getActivitiesWithHeartRate(String token, int page) {
         List<StravaActivity> allActivities = stravaClient.getActivities(token, page);
 
@@ -50,6 +49,10 @@ public class ActivityService {
 
     public List<StravaActivity.ActivityStream> getActivityStreams(String token, Long id) {
         return stravaClient.getActivityStreams(token, id);
+    }
+
+    public AthleteConfig getAthleteConfig() {
+        return this.athleteConfig;
     }
 
     @Transactional

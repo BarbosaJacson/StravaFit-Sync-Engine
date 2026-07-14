@@ -27,10 +27,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -43,8 +41,6 @@ public class InsightService {
     private final ActivitySummaryRepository activitySummaryRepository;
     private final KnowledgeService knowledgeService;
     private final InsightService self;
-    private final int hrMaxConfig;
-    private final int hrResting;
     private final String nomeAtleta;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
@@ -54,11 +50,10 @@ public class InsightService {
     public InsightService(GeminiClient geminiClient,
                           ActivityRepository activityRepository,
                           WorkoutPrescriptionRepository workoutPrescriptionRepository,
-                          ActivitySummaryRepository activitySummaryRepository, ActivityService activityService,
+                          ActivitySummaryRepository activitySummaryRepository,
+                          ActivityService activityService,
                           @Lazy InsightService self,
                           KnowledgeService knowledgeService,
-                          @Value("${atleta.hr-max:173}") int hrMaxConfig,
-                          @Value("${atleta.hr-resting:53}") int hrResting,
                           @Value("${atleta.nome:Jacson}") String nomeAtleta) {
         this.geminiClient = geminiClient;
         this.activityRepository = activityRepository;
@@ -67,11 +62,8 @@ public class InsightService {
         this.activityService = activityService;
         this.self = self;
         this.knowledgeService = knowledgeService;
-        this.hrMaxConfig = hrMaxConfig;
-        this.hrResting = hrResting;
         this.nomeAtleta = nomeAtleta;
     }
-
 
     @Transactional
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
@@ -85,12 +77,20 @@ public class InsightService {
     }
 
     private String generateInsight(Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
+        int nivelCenario1 = calcularNivelDinamicoCenario1();
+        int nivelCenario2 = calcularNivelDinamicoCenario2();
+
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
         String proximoTreinoData = calcularProximaDataTreino(activityDate);
         SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed);
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior = workoutPrescriptionRepository.findTopByScheduledDateOrderByCreatedAtDesc(activityDate.toLocalDate());
 
-        String prompt = buildProfessionalPrompt(name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null), analysis);
+        // 🎯 Captura a classificação fisiológica real calculada matematicamente pelo Java
+        String tipoEstimuloReal = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
+
+        // 🎯 Passamos o tipoEstimuloReal para o construtor do prompt
+        String prompt = buildProfessionalPrompt(name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null), nivelCenario1, nivelCenario2, tipoEstimuloReal);
+
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
 
@@ -124,7 +124,7 @@ public class InsightService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void extractAndSavePrescription(Long activityId, String rawAiResponse) {
         try {
-            String xml = extractXmlBlock(rawAiResponse, "prescription_data");
+            String xml = extractXmlBlock(rawAiResponse);
             if (xml == null) {
                 log.warn("[PRESCRIPTION] Bloco XML <prescription_data> não encontrado na resposta da IA para a atividade {}", activityId);
                 return;
@@ -145,7 +145,7 @@ public class InsightService {
             prescription.setFocus(extractTagValue(xml, "focus"));
             prescription.setMethod(extractTagValue(xml, "method"));
             prescription.setRawGeminiResponse(rawAiResponse);
-            
+
             workoutPrescriptionRepository.saveAndFlush(prescription);
             log.info("[DB] Prescrição salva com sucesso para a data: {}", prescription.getScheduledDate());
 
@@ -153,13 +153,125 @@ public class InsightService {
             log.error("[PRESCRIPTION] Falha ao extrair ou salvar a prescrição: {}", e.getMessage(), e);
         }
     }
+    /**
+     * Calcula dinamicamente o nível atual do atleta para o Cenário 1 (Aeróbico)
+     * baseado no histórico real de Efficiency Index salvos no MySQL.
+     */
+    private int calcularNivelDinamicoCenario1() {
+        List<ActivitySummaryEntity> historicoZ2 = activitySummaryRepository.findTop10ByDominantZoneOrderByStartDateDesc(2);
 
-    private String buildProfessionalPrompt(String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData, WorkoutPrescriptionEntity prescricaoAnterior, List<StravaActivity.MinuteAnalysis> analysis) {
+        if (historicoZ2.isEmpty()) {
+            return 1;
+        }
+
+        double mediaEficienciaRecente = historicoZ2.stream()
+                .mapToDouble(ActivitySummaryEntity::getEfficiencyIndex)
+                .average()
+                .orElse(0.0);
+
+        log.info("[PROGRESSÃO] Média de Eficiência Recente em Z2: {}", String.format("%.3f", mediaEficienciaRecente));
+
+        if (mediaEficienciaRecente >= 1.10) {
+            return 5;
+        } else if (mediaEficienciaRecente >= 1.08) {
+            return historicoZ2.size() >= 8 ? 4 : 3;
+        } else if (mediaEficienciaRecente >= 1.06) {
+            return 2;
+        }
+
+        return 1;
+    }
+
+    /**
+     * Calcula dinamicamente o nível atual do atleta para o Cenário 2 (Tiros de Quinta)
+     * baseado no histórico real do MySQL.
+     */
+    private int calcularNivelDinamicoCenario2() {
+        List<ActivitySummaryEntity> historicoTiros = activitySummaryRepository.findTop10ByDominantZoneOrderByStartDateDesc(5);
+
+        if (historicoTiros.isEmpty()) {
+            return 1;
+        }
+
+        double mediaEficienciaTiros = historicoTiros.stream()
+                .mapToDouble(ActivitySummaryEntity::getEfficiencyIndex)
+                .average()
+                .orElse(0.0);
+
+        log.info("[PROGRESSÃO] Média de Eficiência Recente em Tiros: {}", String.format("%.3f", mediaEficienciaTiros));
+
+        if (mediaEficienciaTiros >= 1.08) {
+            return 5;
+        } else if (mediaEficienciaTiros >= 1.06) {
+            return 3;
+        } else if (mediaEficienciaTiros >= 1.05) {
+            return 2;
+        }
+
+        return 1;
+    }
+    private String classificarEstimuloFisiologico(List<StravaActivity.MinuteAnalysis> analysis, double stdDevGlobal, double fcMax, double fcMedia) {
+        if (analysis == null || analysis.size() < 5) {
+            return "NÃO IDENTIFICADO (DADOS INSUFICIENTES)";
+        }
+
+        int totalMinutos = analysis.size();
+        int contagemJanelasInstaveis = 0;
+        int tamanhoJanela = 5; // Janela móvel de 5 minutos
+
+        // Extrai a série temporal de FC minuto a minuto limpa
+        List<Double> frequencias = analysis.stream()
+                .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (frequencias.size() < tamanhoJanela) {
+            return "CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)";
+        }
+
+        // Varre a série minuto a minuto calculando o desvio padrão local de cada bloco de 5 min
+        for (int i = 0; i <= frequencias.size() - tamanhoJanela; i++) {
+            List<Double> subLista = frequencias.subList(i, i + tamanhoJanela);
+
+            // Calcula a média da janela
+            double mediaJanela = subLista.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+
+            // Calcula o desvio padrão da janela de 5 min
+            double varianciaJanela = subLista.stream()
+                    .mapToDouble(fc -> Math.pow(fc - mediaJanela, 2))
+                    .average()
+                    .orElse(0.0);
+            double stdDevJanela = Math.sqrt(varianciaJanela);
+
+            // Se o desvio padrão local for alto (mudança brusca de FC em 5 minutos), identifica como instabilidade (tiro/recuperação)
+            if (stdDevJanela >= 8.5) {
+                contagemJanelasInstaveis++;
+            }
+        }
+
+        // Calcula a proporção de instabilidade no treino
+        double proporcaoInstabilidade = (double) contagemJanelasInstaveis / (totalMinutos - tamanhoJanela + 1);
+
+        log.info("[CLASSIFICADOR] Janelas instáveis detectadas: {} de {} | Proporção: {}%",
+                contagemJanelasInstaveis, (totalMinutos - tamanhoJanela + 1), String.format("%.1f", proporcaoInstabilidade * 100));
+
+        // Regra de Ouro: Se mais de 15% do treino apresentou picos e quedas bruscas de FC em janelas de 5 min, é um treino de tiros/intervalado
+        if (proporcaoInstabilidade >= 0.15 || stdDevGlobal >= 11.0) {
+            return "INTENSO / INTERVALADO (TIROS)";
+        }
+
+        return "CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)";
+    }
+
+    private String buildProfessionalPrompt(String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData, WorkoutPrescriptionEntity prescricaoAnterior, int nivelCenario1, int nivelCenario2, String tipoEstimuloReal) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext();
         List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
 
-        double histVo2Medio = historico.stream().mapToDouble(a -> 15.3 * ((a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMaxConfig) / (double) hrResting)).average().orElse(0.0);
+        int hrMax = activityService.getAthleteConfig().getHrMax();
+        int hrRest = activityService.getAthleteConfig().getHrResting();
+
+        double histVo2Medio = historico.stream().mapToDouble(a -> 15.3 * ((a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMax) / (double) hrRest)).average().orElse(0.0);
         double histFcMaxMedia = historico.stream().mapToDouble(a -> a.getMaxHeartRate() != null ? a.getMaxHeartRate() : 0).average().orElse(0.0);
         double histFcMediaGeral = historico.stream().mapToDouble(a -> a.getAverageHeartRate() != null ? a.getAverageHeartRate() : 0).average().orElse(0.0);
         double histPaceMedioSegundos = historico.stream().filter(a -> a.getDistanceKm() != null && a.getDistanceKm() > 0 && a.getTotalTimeMinutes() != null && a.getTotalTimeMinutes() > 0).mapToDouble(a -> (a.getTotalTimeMinutes() * 60.0) / a.getDistanceKm()).average().orElse(0.0);
@@ -167,68 +279,75 @@ public class InsightService {
 
         StringBuilder sb = new StringBuilder();
 
-        sb.append("VOCÊ É UM ANALISTA DE PERFORMANCE DE ELITE. SUA MISSÃO É ANALISAR OS DADOS DE TREINO E FORNECER FEEDBACKS TÉCNICOS SEGUINDO ESTRITAMENTE O FORMATO SOLICITADO.\n\n");
+        sb.append("VOCÊ É UM ANALISTA DE PERFORMANCE DE ELITE E FISIOLOGISTA DE CORRIDA DO PROJETO STRAVAFIT.\n");
+        sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO SEGUINDO A MATRIZ DE CONHECIMENTO, PRESCREVER A RECUPERAÇÃO TÉCNICA E GERAR A PRÓXIMA PRESCRIÇÃO.\n\n");
+
+        sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
+
+        sb.append("--- CLASSIFICAÇÃO FISIOLÓGICA REAL DA ATIVIDADE (CÁLCULO MATEMÁTICO DO SISTEMA) ---\n");
+        sb.append("ATENÇÃO IA, NÃO TENTE ADIVINHAR O TIPO DE TREINO. O SISTEMA ANALISOU OS DADOS TEMPORAIS MINUTO A MINUTO E CONSOLIDOU O SEGUINTE FATO:\n");
+        sb.append("- TIPO DE ESTÍMULO EXECUTADO HOJE: ").append(tipoEstimuloReal).append("\n");
+        sb.append("- DESVIO PADRÃO DA FC DO TREINO: ").append(String.format("%.2f", metrics.stdDev())).append(" bpm\n");
+        sb.append("- INSTRUÇÃO DE ANÁLISE: Se o estímulo foi classificado como 'INTENSO / INTERVALADO (TIROS)', você deve obrigatoriamente acionar o 'CENÁRIO 2' para o diagnóstico. Se foi 'CONTÍNUO / ESTÁVEL', utilize obrigatoriamente o 'CENÁRIO 1'.\n\n");
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN (ASTERISCOS, HASHTAGS, ETC.).\n\n");
-        
+
+        // 🎯 Integração da Base de Conhecimento Unificada extraída do MongoDB
         if (scientificContext != null && !scientificContext.isBlank()) {
-            sb.append("--- BASE DE CONHECIMENTO ---\n").append(scientificContext).append("\n\n");
+            sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO E DIRETRIZES DO MONGODB ---\n");
+            sb.append(scientificContext).append("\n\n");
         }
 
         sb.append("--- DADOS DO TREINO ATUAL ---\n");
         sb.append("DADOS DO TREINO: ").append(name).append(" | ").append(String.format("%.1f km", metrics.safeDistance())).append(" | Pace Médio: ").append(metrics.paceFormatted()).append("\n");
-        
-        sb.append("\n\n--- TAREFA PARA A IA ---\n");
-        sb.append("1. Analise os 'DADOS DO TREINO ATUAL'.\n");
-        sb.append("2. Com base na sua análise e na 'BASE DE CONHECIMENTO', identifique o 'CENÁRIO' do treino.\n");
-        sb.append("3. Construa a resposta final preenchendo ESTRITAMENTE o formato abaixo.\n\n");
+        sb.append("DURACAO: ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append("\n");
+        sb.append("DESVIO PADRÃO DA FC: ").append(String.format("%.1f", metrics.stdDev())).append(" bpm | COMPORTAMENTO CARDÍACO: ").append(metrics.comportamento()).append("\n\n");
 
-        sb.append("--- FORMATO DE SAÍDA OBRIGATÓRIO ---\n");
+        sb.append("--- INSTRUÇÕES CRUCIAIS PARA A IA ---\n");
+        sb.append("1. IDENTIFICAÇÃO DO CENÁRIO:\n");
+        sb.append("   - Leia as regras de aplicabilidade do 'CENARIO 1' (Eficiência Metabólica) e 'CENARIO 2' (Intensidade - Tiros).\n");
+        sb.append("   - Identifique qual cenário se aplica ao treino executado hoje. Use o título exato do cenário no campo '📌 Cenário Detectado'.\n\n");
+
+        sb.append("2. DIAGNÓSTICO TÉCNICO FISIOLÓGICO (SEÇÃO 2.0):\n");
+        sb.append("   - Identifique o nível atual do atleta no cenário mapeado (por exemplo, correlacione o volume/tempo com os níveis descritos no Cenário).\n");
+        sb.append("   - Avalie o 'Efficiency Index' atual de ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" com base na tabela de 'legendas_eficiencia' do cenário identificado.\n");
+        sb.append("   - Use o texto e a argumentação dos 'diagnosticos_clinicos' do cenário identificado no MongoDB como base direta para redigir o diagnóstico técnico, citando as referências científicas do arquivo (ex: San-Millán & Brooks, Seiler ou Casanova et al.).\n\n");
+
+        sb.append("3. NUTRIÇÃO E DESCANSO (SEÇÃO 5.0):\n");
+        sb.append("   - Consulte os documentos de 'NUTRITION' e 'REST' do MongoDB.\n");
+        sb.append("   - Se o treino de hoje foi de baixa intensidade (Z2), use estritamente as diretrizes de 'light_moderated_days'.\n");
+        sb.append("   - Se o treino de hoje foi de alta intensidade (Tiros/HIIT), use estritamente as diretrizes de 'high_intensity_days' (incluindo o alerta crítico de evitar megadoses de antioxidantes sintéticos para preservar a adaptação hormética pela via NOX2) e os protocolos de regeneração do documento 'REST'.\n\n");
+
+        sb.append("4. PRESCRIÇÃO STRAFIT PREDICT (SEÇÃO 6.0):\n");
+        sb.append("   - Identifique o dia da semana correspondente ao próximo treino agendado em: ").append(proximoTreinoData.toUpperCase()).append("\n");
+        sb.append("   - Consulte a agenda obrigatória contida no documento 'ID ATHLETE' ou 'microciclo_semanal_atleta' para esse dia da semana específico.\n");
+        sb.append("   - SE A DATA DO PRÓXIMO TREINO CAIR EM UMA QUINTA-FEIRA (THURSDAY), você deve prescrever OBRIGATORIAMENTE o 'CENÁRIO 2' (Tiros/Intervalado) na intensidade Z5 / Ritmo forte, usando a progressão de estrutura descrita no 'CENARIO 2' ou 'INTENSITY SCENARIO 2' nível 1.\n");
+        sb.append("   - SE A DATA DO PRÓXIMO TREINO CAIR EM TERÇA (TUESDAY) OU SÁBADO (SATURDAY), prescreva OBRIGATORIAMENTE o 'CENÁRIO 1' (Rodagem em Zona 2), definindo o volume de km de acordo com o nível atual do atleta para esse dia.\n\n");
+
+        sb.append("--- FORMATO DE SAÍDA OBRIGATÓRIO (NÃO USE MARKDOWN) ---\n");
         sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
         sb.append(dataFormatada).append("\n");
-        sb.append("📌 Cenário Detectado: [PREENCHA AQUI COM O TÍTULO DO CENÁRIO IDENTIFICADO]\n\n");
-        sb.append("⚡ Intensidade do Estímulo: [ANALISE O DESVIO PADRÃO DA FC (").append(String.format("%.1f", metrics.stdDev())).append(" bpm) E O PICO DE FC (").append(String.format("%.0f%%", metrics.fcMaxPercentage())).append(" da FC Máx) PARA CLASSIFICAR A INTENSIDADE.]\n\n");
-        
+        sb.append("📌 Cenário Detectado: [Título Exato do Cenário do MongoDB]\n\n");
+        sb.append("⚡ Intensidade do Estímulo: [Classifique a intensidade com base nas métricas de desvio padrão e pico de FC]\n\n");
+
         sb.append("📊 Métricas: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
 
         sb.append("📊 Distribuição de Esforço por Zona Cardíaca:\n");
 
-        // 🔄 Descobre dinamicamente os limites de BPM chamando o método público do ActivityService para cada zona
+        // Mapeamento dinâmico das zonas
         java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
         java.util.Map<Integer, Integer> maxBpms = new java.util.HashMap<>();
-
-        // Percorre todos os BPMs possíveis para mapear onde cada zona realmente começa e termina
-        for (int bpm = hrResting; bpm <= hrMaxConfig; bpm++) {
+        for (int bpm = hrRest; bpm <= hrMax; bpm++) {
             int z = activityService.calculateKarvonenZone(bpm);
             if (z > 0) {
                 minBpms.putIfAbsent(z, bpm);
-                maxBpms.put(z, bpm); // Atualiza constantemente até achar o teto da zona
+                maxBpms.put(z, bpm);
             }
         }
-
-        // Busca as porcentagens calculadas unicamente pelo ActivityService
-        List<Double> hrData = analysis.stream()
-                .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
-                .filter(Objects::nonNull)
-                .toList();
-        Map<Integer, Double> zonePercentages = activityService.calculateZonePercentages(hrData);
-
-        // Renderiza cada zona com seus limites exatos baseados na regra de negócio
+        Map<Integer, Double> zonePercentages = metrics.zonePercentages();
         for (int zona = 1; zona <= 5; zona++) {
             double pct = zonePercentages.getOrDefault(zona, 0.0);
             int bpmMin = minBpms.getOrDefault(zona, 0);
             int bpmMax = maxBpms.getOrDefault(zona, 0);
-
-            // Se os limites não foram encontrados (zona vazia), exibe os teóricos aproximados
-            if (bpmMin == 0 || bpmMax == 0) {
-                int hrr = hrMaxConfig - hrResting;
-                switch (zona) {
-                    case 1 -> { bpmMin = (int) (hrResting + (0.50 * hrr)); bpmMax = (int) (hrResting + (0.60 * hrr)) - 1; }
-                    case 2 -> { bpmMin = (int) (hrResting + (0.60 * hrr)); bpmMax = (int) (hrResting + (0.70 * hrr)) - 1; }
-                    case 3 -> { bpmMin = (int) (hrResting + (0.70 * hrr)); bpmMax = (int) (hrResting + (0.80 * hrr)) - 1; }
-                    case 4 -> { bpmMin = (int) (hrResting + (0.80 * hrr)); bpmMax = (int) (hrResting + (0.90 * hrr)) - 1; }
-                    case 5 -> { bpmMin = (int) (hrResting + (0.90 * hrr)); bpmMax = hrMaxConfig; }
-                }
-            }
 
             String descricaoZona = switch (zona) {
                 case 1 -> String.format("Zona 1 (Ativa / Recuperação) [%d - %d bpm]", bpmMin, bpmMax);
@@ -238,11 +357,10 @@ public class InsightService {
                 case 5 -> String.format("Zona 5 (Capacidade Anaeróbica / Pico) [%d - %d bpm]", bpmMin, bpmMax);
                 default -> "Zona " + zona;
             };
-
             sb.append(String.format("  - %s: %.1f%%\n", descricaoZona, pct));
         }
-        sb.append("\n");
-        sb.append("\n");
+        sb.append("\n\n");
+
         if (prescricaoAnterior != null) {
             sb.append("📋 Referência (Treino Anterior Prescrito):\n");
             sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
@@ -250,34 +368,34 @@ public class InsightService {
             sb.append("- Intensidade Alvo: ").append(prescricaoAnterior.getIntensity()).append("\n");
             sb.append("- Foco Técnico: ").append(prescricaoAnterior.getFocus()).append("\n\n");
         }
-        
+
         sb.append("📊 Histórico Médio (Últimos 10 treinos):\n");
         sb.append("- VO2 Máx Médio: ").append(String.format("%.1f", histVo2Medio)).append(" ml/kg/min\n");
         sb.append("- FC Máxima Média: ").append(String.format("%.0f", histFcMaxMedia)).append(" bpm\n");
         sb.append("- FC Média Geral: ").append(String.format("%.0f", histFcMediaGeral)).append(" bpm\n");
         sb.append("- Pace Médio: ").append(formatSecondsToPace(histPaceMedioSegundos)).append(" min/km\n");
         sb.append("- Eficiência Média: ").append(String.format("%.3f", histEfficiencyIndex)).append(" (m/bpm*min)\n\n");
-        
+
         sb.append("1.0 - STATUS DO TREINO (CUMPRIMENTO DO PLANO):\n");
-        sb.append("[ANALISE A 'SERIE TEMPORAL' PARA DETECTAR PICOS DE FC...]\n\n");
-        
+        sb.append("[Escreva uma análise rica se o atleta seguiu as diretrizes do plano anterior com base nas métricas atuais]\n\n");
+
         sb.append("2.0 - DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n");
-        sb.append("[BUSQUE NA 'BASE DE CONHECIMENTO' O CENÁRIO...]\n\n");
-        
+        sb.append("[Determine e descreva a faixa de eficiência baseada no Efficiency Index (Ex: Eficiente, Excelente). Insira o texto técnico fisiológico embasando os processos celulares com base nos 'diagnosticos_clinicos' do cenário ativo no MongoDB, referenciando formalmente as pesquisas do arquivo]\n\n");
+
         sb.append("3.0 - ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n");
-        sb.append("[O 'efficiency_index' calculado para este treino foi de ").append(String.format("%.3f", metrics.efficiencyIndex())).append("...]\n\n");
-        
+        sb.append("[Analise a economia de corrida e o comportamento de fadiga (Pace Drift) do treino atual]\n\n");
+
         sb.append("4.0 - CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n");
-        sb.append("[FAÇA UMA CONCLUSÃO BREVE E MOTIVACIONAL...]\n\n");
-        
+        sb.append("[Gere uma conclusão encorajadora focada na Meia Maratona de 01/11/2026, destacando a importância do cumprimento do plano]\n\n");
+
         sb.append("5.0 - NUTRIÇÃO / DESCANSO\n");
-        sb.append("[CONSULTE A 'BASE DE CONHECIMENTO'...]\n\n");
-        
+        sb.append("[Prescreva a estratégia detalhada de alimentação pré e pós treino com as opções sugeridas no MongoDB (incluindo as fontes alimentares específicas, o alerta de antioxidantes sintéticos na NOX2 se for tiros, e os tempos de repouso muscular de 4h e de transição/intervalos entre estímulos)]\n\n");
+
         sb.append("6.0 --- PRESCRIÇÃO STRAFIT PREDICT PARA ").append(proximoTreinoData.toUpperCase()).append(" ---\n");
-        sb.append("[DIRETRIZES OBRIGATÓRIAS DE PRESCRIÇÃO...]\n\n");
+        sb.append("[Gere a prescrição detalhada de acordo com a regra do dia da semana correspondente. Se a data cair na quinta-feira, prescreva de forma mandatória o treino de tiros Z5 (Cenário 2 Nível 1) detalhando o aquecimento, repetições, tempos de esforço e de pausa]\n\n");
 
         sb.append("--- INSTRUÇÃO TÉCNICA DO SISTEMA ---\n");
-        sb.append("Ao final do relatório, adicione OBRIGATORIAMENTE um bloco XML com os dados da prescrição criada:\n");
+        sb.append("Ao final do relatório, adicione OBRIGATORIAMENTE o bloco XML com os dados da prescrição criada:\n");
         sb.append("<prescription_data>\n");
         sb.append("  <scheduled_date>").append(parseNextWorkoutDate(proximoTreinoData).format(DateTimeFormatter.ISO_LOCAL_DATE)).append("</scheduled_date>\n");
         sb.append("  <type>[Tipo do treino]</type>\n");
@@ -289,7 +407,6 @@ public class InsightService {
 
         return sb.toString();
     }
-
     public record SessionMetrics(double fcMedia, double fcMax, int duracao, double stdDev, int zonaPredominante, double z2Percent, String comportamento, double fcMaxPercentage, double vo2MaxEstimado, double ganhoAlt, double efficiencyIndex, double safeDistance, String paceFormatted, Map<Integer, Double> zonePercentages) {}
 
     private SessionMetrics calcularMetricasSessao(List<StravaActivity.MinuteAnalysis> analysis, Double distance, Double averageSpeed) {
@@ -297,45 +414,41 @@ public class InsightService {
         double fcMax = analysis.stream().map(StravaActivity.MinuteAnalysis::getMaxHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).max().orElse(0.0);
         int duracao = analysis.size();
 
-
         double variance = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(m -> Math.pow(m - fcMedia, 2)).average().orElse(0.0);
         double stdDev = Math.sqrt(variance);
 
-        // 📊 1. Mapeia a contagem exata de minutos por zona
-        Map<Integer, Long> zoneCounts = analysis.stream()
-                .map(StravaActivity.MinuteAnalysis::getZone)
+        int hrMax = activityService.getAthleteConfig().getHrMax();
+        int hrRest = activityService.getAthleteConfig().getHrResting();
+
+        // 💡 Ajustado: Removidos filtros redundantes Objects::nonNull
+        List<Double> hrData = analysis.stream()
+                .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
                 .filter(Objects::nonNull)
-                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+                .toList();
+        Map<Integer, Double> zonePercentages = activityService.calculateZonePercentages(hrData);
 
-        // 📈 2. Calcula o percentual exato gasto em cada zona (Z1 a Z5)
-        Map<Integer, Double> zonePercentages = Map.of(
-                1, (duracao > 0) ? (zoneCounts.getOrDefault(1, 0L) * 100.0) / duracao : 0.0,
-                2, (duracao > 0) ? (zoneCounts.getOrDefault(2, 0L) * 100.0) / duracao : 0.0,
-                3, (duracao > 0) ? (zoneCounts.getOrDefault(3, 0L) * 100.0) / duracao : 0.0,
-                4, (duracao > 0) ? (zoneCounts.getOrDefault(4, 0L) * 100.0) / duracao : 0.0,
-                5, (duracao > 0) ? (zoneCounts.getOrDefault(5, 0L) * 100.0) / duracao : 0.0
-        );
-
-        // 👑 3. Calcula a Zona Predominante corrigindo empates (prioriza maior intensidade em caso de empate)
-        int zonaPredominante = zoneCounts.entrySet().stream()
+        int zonaPredominante = zonePercentages.entrySet().stream()
+                .filter(entry -> entry.getKey() > 0)
                 .max((entry1, entry2) -> {
                     int compare = entry1.getValue().compareTo(entry2.getValue());
                     if (compare == 0) {
-                        return entry1.getKey().compareTo(entry2.getKey()); // Desempata pela zona mais alta (Z3 > Z2)
+                        return entry1.getKey().compareTo(entry2.getKey());
                     }
                     return compare;
                 })
                 .map(Map.Entry::getKey).orElse(0);
 
-        double z2Percent = zonePercentages.get(2);
+        double z2Percent = zonePercentages.getOrDefault(2, 0.0);
 
+        // 💡 Ajustado: Removidos filtros redundantes Objects::nonNull nas médias temporais
         double firstHalf = analysis.stream().limit(duracao / 2).map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).average().orElse(fcMedia);
         double secondHalf = analysis.stream().skip(duracao / 2).map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).average().orElse(fcMedia);
         String comportamento = (secondHalf > firstHalf * 1.05) ? "subindo gradualmente (drift)" : "predominantemente estável";
 
-        double fcMaxPercentage = (fcMax / hrMaxConfig) * 100;
-        double vo2MaxEstimado = 15.3 * (fcMax / hrResting);
+        double fcMaxPercentage = (fcMax / hrMax) * 100;
+        double vo2MaxEstimado = 15.3 * (fcMax / (double) hrRest);
 
+        // 💡 Ajustado: Removido filtro redundante Objects::nonNull na elevação
         DoubleSummaryStatistics elevStats = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageElevation).filter(Objects::nonNull).mapToDouble(Double::doubleValue).summaryStatistics();
         double ganhoAlt = elevStats.getMax() - elevStats.getMin();
         if (ganhoAlt < 0 || elevStats.getCount() == 0) ganhoAlt = 0.0;
@@ -346,8 +459,10 @@ public class InsightService {
 
         return new SessionMetrics(fcMedia, fcMax, duracao, stdDev, zonaPredominante, z2Percent, comportamento, fcMaxPercentage, vo2MaxEstimado, ganhoAlt, efficiencyIndex, safeDistance, paceFormatted, zonePercentages);
     }
-    private String extractXmlBlock(String text, String blockName) {
-        Pattern pattern = Pattern.compile("<" + blockName + ">(.*?)</" + blockName + ">", Pattern.DOTALL);
+
+    // 💡 Ajustado: O parâmetro 'blockName' foi removido e a regex foi otimizada para ser estrita a "prescription_data"
+    private String extractXmlBlock(String text) {
+        Pattern pattern = Pattern.compile("<prescription_data>(.*?)</prescription_data>", Pattern.DOTALL);
         Matcher matcher = pattern.matcher(text);
         if (matcher.find()) {
             return matcher.group(0);
@@ -366,7 +481,6 @@ public class InsightService {
 
     private String removeXmlBlock(String text) {
         if (text == null) return "";
-        // CORREÇÃO: Usa (?s) para que o '.' corresponda a quebras de linha, removendo o bloco XML de múltiplas linhas.
         return text.replaceAll("(?s)<prescription_data>.*?</prescription_data>", "").trim();
     }
 
@@ -382,7 +496,7 @@ public class InsightService {
         long seconds = (long) (totalSeconds % 60);
         return String.format("%d:%02d min/km", minutes, seconds);
     }
-    
+
     private String formatSecondsToPace(double totalSeconds) {
         if (totalSeconds <= 0) return "N/A";
         long minutes = (long) (totalSeconds / 60);
@@ -400,9 +514,8 @@ public class InsightService {
         }
         return dataIteracao.format(NEXT_WORKOUT_FORMATTER);
     }
-    
+
     private LocalDate parseNextWorkoutDate(String proximoTreinoData) {
-        // O formato é "EEEE, dd/MM/yyyy"
         return LocalDate.parse(proximoTreinoData.split(", ")[1], DateTimeFormatter.ofPattern("dd/MM/yyyy"));
     }
 
