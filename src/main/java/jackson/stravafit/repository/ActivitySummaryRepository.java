@@ -13,4 +13,9 @@ public interface ActivitySummaryRepository extends JpaRepository<ActivitySummary
     // 🎯 Consulta SQL nativa para buscar os últimos 10 treinos de uma determinada zona no seu MySQL da Aiven
     @Query(value = "SELECT * FROM activity_performance_summary WHERE dominant_zone = :dominantZone ORDER BY start_date DESC LIMIT 10", nativeQuery = true)
     List<ActivitySummaryEntity> findTop10ByDominantZoneOrderByStartDateDesc(@Param("dominantZone") int dominantZone);
+
+    List<ActivitySummaryEntity> findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(
+            Integer detectedScenario,
+            Integer detectedLevel
+    );
 }

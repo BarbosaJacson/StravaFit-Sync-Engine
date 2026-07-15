@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime; // Import adicionado
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "workout_prescriptions")
@@ -56,6 +56,12 @@ public class WorkoutPrescriptionEntity {
 
     @Column(name = "raw_gemini_response", columnDefinition = "TEXT")
     private String rawGeminiResponse; // A resposta completa do Gemini para referência
+
+    @Column(name = "target_scenario", nullable = false)
+    private Integer targetScenario;
+
+    @Column(name = "target_level", nullable = false)
+    private Integer targetLevel;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
