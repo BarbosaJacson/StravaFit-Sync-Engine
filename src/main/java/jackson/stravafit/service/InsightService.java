@@ -424,7 +424,7 @@ public class InsightService {
         sb.append("   - Se o treino de hoje foi de baixa intensidade (Z2), use estritamente as diretrizes de 'light_moderated_days'.\n");
         sb.append("   - Se o treino de hoje foi de alta intensidade (Tiros/HIIT), use estritamente as diretrizes de 'high_intensity_days' (incluindo o alerta crítico de evitar megadoses de antioxidantes sintéticos para preservar a adaptação hormética pela via NOX2) e os protocolos de regeneração do documento 'REST'.\n\n");
 
-        sb.append("4. PRESCRIÇÃO STRAFIT PREDICT (SEÇÃO 6.0):\n");
+        sb.append("4. 📅 PRESCRIÇÃO STRAFIT PREDICT (SEÇÃO 6.0):\n");
         sb.append("   - Identifique o dia da semana correspondente ao próximo treino agendado em: ").append(proximoTreinoData.toUpperCase()).append("\n");
         sb.append("   - SE O PRÓXIMO TREINO FOR UMA QUINTA-FEIRA (THURSDAY):\n");
         sb.append("     * Você deve obrigatoriamente prescrever o 'CENÁRIO 2' (Tiros/Intervalado).\n");
@@ -442,10 +442,9 @@ public class InsightService {
         sb.append("     * Você deve obrigatoriamente prescrever o 'CENÁRIO 1' (Corrida Aeróbica Contínua / Eficiência Metabólica).\n\n");
 
         sb.append("     * DADOS REAIS DE CONTEXTO METABÓLICO DO ATLETA:\n");
-        sb.append("       - Média de Eficiência nas RODAGENS DE TERÇA (Curto - Âncora de Volume): ")
-                .append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" (Meta do MongoDB: >= 1.04 para o Nível 1)\n");
-        sb.append("       - Média de Eficiência nos LONGÕES DE SÁBADO (Longo - Progressão de Endurance): ")
-                .append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" (Meta do MongoDB: >= 1.03 para o Nível 2)\n\n");
+        sb.append("       - Última Distância Realizada em Longão de Sábado: ").append(String.format("%.2f km", metrics.safeDistance())).append("\n");
+        sb.append("       - Média Real de Eficiência nas RODAGENS DE TERÇA (Últimos 5 treinos): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append("\n");
+        sb.append("       - Média Real de Eficiência nos LONGÕES DE SÁBADO (Últimos 5 treinos): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append("\n\n");
 
         sb.append("     * REGRA DE PRESCRIÇÃO MANDATÓRIA BASEADA NO DIA DA SEMANA:\n");
         if (proximoEhSabado) {
@@ -453,7 +452,7 @@ public class InsightService {
             sb.append("       - Use a média específica dos longões (")
                     .append(String.format("%.3f", mediaEficienciaZ2Longo))
                     .append(") para analisar a proximidade do atleta com o gatilho de promoção do Nível ").append(nivelCenario1)
-                    .append(" (que analisa os critérios decada nível incluindo distancia e o Efficiency Index no MongoDB para subir progressão de Nível de forma sequencial e gradativa).\n");
+                    .append("       - Explique fisiologicamente ao atleta o seu estado atual dentro deste nível, confrontando seu Efficiency Index com o 'valor_estavel' exigido no JSON do MongoDB para este volume específico, reforçando que a progressão de distância é estritamente sequencial.\n");
         } else {
             sb.append("       - O próximo treino é TERÇA-FEIRA (RODAGEM CURTA). Você deve obrigatoriamente prescrever o NÍVEL ").append(nivelCenario1).append(".\n");
             sb.append("       - IMPORTANTE: As terças-feiras são âncoras de recuperação e controle de carga semanal. Por isso, o ideal é manter o treino no Nível 1 (7 a 10 km) para evitar fadiga crônica residual.\n");
@@ -511,13 +510,6 @@ public class InsightService {
         }
         sb.append("\n\n");
 
-        if (prescricaoAnterior != null) {
-            sb.append("📋 Referência (Treino Anterior Prescrito):\n");
-            sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
-            sb.append("- Duração/Volume: ").append(prescricaoAnterior.getDuration()).append("\n");
-            sb.append("- Intensidade Alvo: ").append(prescricaoAnterior.getIntensity()).append("\n");
-            sb.append("- Foco Técnico: ").append(prescricaoAnterior.getFocus()).append("\n\n");
-        }
         sb.append("\n--- HISTÓRICO DE PERFORMANCE SEGMENTADO (ÚLTIMOS 5 RESULTADOS) ---\n");
         sb.append("Use estes dados reais do MySQL para avaliar a proximidade do atleta com o gatilho de promoção:\n");
         sb.append(historicosUnificados).append("\n");
@@ -529,7 +521,14 @@ public class InsightService {
         sb.append("- Pace Médio: ").append(formatSecondsToPace(histPaceMedioSegundos)).append(" min/km\n");
         sb.append("- Eficiência Média: ").append(String.format("%.3f", histEfficiencyIndex)).append(" (m/bpm*min)\n\n");
 
-        sb.append("1.0 - STATUS DO TREINO (CUMPRIMENTO DO PLANO):\n");
+        if (prescricaoAnterior != null) {
+            sb.append("📋 Referência (Treino Anterior Prescrito):\n");
+            sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
+            sb.append("- Duração/Volume: ").append(prescricaoAnterior.getDuration()).append("\n");
+            sb.append("- Intensidade Alvo: ").append(prescricaoAnterior.getIntensity()).append("\n");
+            sb.append("- Foco Técnico: ").append(prescricaoAnterior.getFocus()).append("\n\n");
+        }
+        sb.append("1.0 - 📋 STATUS DO TREINO (CUMPRIMENTO DO PLANO):\n");
         sb.append("REGRA DE STATUS: Analise se o atleta cumpriu o volume (tempo/distância) e a intensidade (zona de FC) planejados no treino anterior.\n");
         sb.append("Comece a seção obrigatoriamente imprimindo uma destas três classificações em maiúsculas:\n");
         sb.append("- [STATUS: CUMPRIDO] (Se cumpriu volume e intensidade dentro de uma margem of 10%)\n");
@@ -537,16 +536,16 @@ public class InsightService {
         sb.append("- [STATUS: NÃO CUMPRIDO] (Se errou severamente tanto a intensidade quanto o volume)\n");
         sb.append("[Após o status, escreva em texto corrido a justificativa técnica fisiológica do cumprimento ou desvio do plano]\n\n");
 
-        sb.append("2.0 - DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n");
+        sb.append("2.0 - 👨‍⚕️ DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n");
         sb.append("[Determine e descreva a faixa de eficiência baseada no Efficiency Index (Ex: Eficiente, Excelente). Insira o texto técnico fisiológico embasando os processos celulares com base nos 'diagnosticos_clinicos' do cenário ativo no MongoDB, referenciando formalmente as pesquisas do arquivo]\n\n");
 
-        sb.append("3.0 - ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n");
+        sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n");
         sb.append("[Analise a economia de corrida e o comportamento de fadiga (Pace Drift) do treino atual]\n\n");
 
-        sb.append("4.0 - CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n");
+        sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n");
         sb.append("[Gere uma conclusão encorajadora focada na Meia Maratona de 01/11/2026, destacando a importância do cumprimento do plano]\n\n");
 
-        sb.append("5.0 - NUTRIÇÃO / DESCANSO\n");
+        sb.append("5.0 - 🍽️ NUTRIÇÃO / DESCANSO 💤\n");
         sb.append("[Prescreva a estratégia detalhada de alimentação pré e pós treino com as opções sugeridas no MongoDB (incluindo as fontes alimentares específicas, o alerta de antioxidantes sintéticos na NOX2 se for tiros, e os tempos de repouso muscular de 4h e de transição/intervalos entre estímulos)]\n\n");
 
         sb.append("--- INSTRUÇÃO TÉCNICA DO SISTEMA ---\n");
