@@ -14,8 +14,7 @@ public interface ActivitySummaryRepository extends JpaRepository<ActivitySummary
     @Query(value = "SELECT * FROM activity_performance_summary WHERE dominant_zone = :dominantZone ORDER BY start_date DESC LIMIT 10", nativeQuery = true)
     List<ActivitySummaryEntity> findTop10ByDominantZoneOrderByStartDateDesc(@Param("dominantZone") int dominantZone);
 
-    List<ActivitySummaryEntity> findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(
-            Integer detectedScenario,
-            Integer detectedLevel
-    );
+    // 🎯 Consulta que traz os últimos 10 treinos de um cenário específico, independente do nível
+    List<ActivitySummaryEntity> findTop10ByDetectedScenarioOrderByStartDateDesc(Integer detectedScenario);
+
 }

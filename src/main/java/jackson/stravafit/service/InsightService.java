@@ -21,6 +21,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.DoubleSummaryStatistics;
 import java.util.List;
 import java.util.Map;
@@ -83,40 +85,67 @@ public class InsightService {
         SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed);
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior = workoutPrescriptionRepository.findTopByScheduledDateOrderByCreatedAtDesc(activityDate.toLocalDate());
 
-        // 2. Buscamos os históricos em listas na memória para reutilização total (Zero queries duplicadas!)
-        List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
-                .findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(2, 1);
+        // 2. Classificamos o estímulo para saber qual cenário a sessão atual pertence
+        String tipoEstimuloReal = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
+        boolean ehTiro = tipoEstimuloReal.contains("TIROS");
 
-        List<ActivitySummaryEntity> listaTercas = activitySummaryRepository
-                .findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(1, 1);
+        // 3. Criamos a entidade da sessão atual em memória para garantir inclusão imediata no histórico do prompt
+        ActivitySummaryEntity treinoAtualVirtual = new ActivitySummaryEntity();
+        treinoAtualVirtual.setActivityId(activityId);
+        treinoAtualVirtual.setStartDate(activityDate.toLocalDateTime());
+        treinoAtualVirtual.setDistanceKm(metrics.safeDistance());
+        treinoAtualVirtual.setTotalTimeMinutes(metrics.duracao());
+        treinoAtualVirtual.setAverageHeartRate(metrics.fcMedia());
+        treinoAtualVirtual.setEfficiencyIndex(metrics.efficiencyIndex());
 
-        List<ActivitySummaryEntity> listaSabados = activitySummaryRepository
-                .findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(1, 2);
+        // 4. Buscamos os históricos existentes no MySQL por Cenário (Sem a trava do nível!)
+        List<ActivitySummaryEntity> listaTirosOriginal = activitySummaryRepository
+                .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
 
+        List<ActivitySummaryEntity> listaCenario1Original = activitySummaryRepository
+                .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
 
-// 2. Calcule as duas médias separadas de forma cirúrgica! 🎯
+        // 5. Injetamos a atividade atual na memória e reordenamos por data (mais recente primeiro)
+        List<ActivitySummaryEntity> listaTiros = new ArrayList<>(listaTirosOriginal);
+        List<ActivitySummaryEntity> listaCenario1 = new ArrayList<>(listaCenario1Original);
+
+        if (ehTiro) {
+            listaTiros.add(0, treinoAtualVirtual);
+            listaTiros.sort(Comparator.comparing(ActivitySummaryEntity::getStartDate).reversed());
+        } else {
+            listaCenario1.add(0, treinoAtualVirtual);
+            listaCenario1.sort(Comparator.comparing(ActivitySummaryEntity::getStartDate).reversed());
+        }
+
+        // 6. Separação precisa por dia da semana na memória
+        List<ActivitySummaryEntity> listaTercas = listaCenario1.stream()
+                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
+                .toList();
+
+        List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
+                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
+                .toList();
+
+        // 7. Cálculo cirúrgico das médias de eficiência incluindo o treino de hoje!
         double mediaEficienciaZ2Curto = calcularMediaEficienciaDaLista(listaTercas, 5);
         double mediaEficienciaZ2Longo = calcularMediaEficienciaDaLista(listaSabados, 5);
         double mediaEficienciaTiros = calcularMediaEficienciaDaLista(listaTiros, 5);
 
-        // 4. Calculamos os níveis dinâmicos com base nos históricos existentes
+        // 8. Calculamos os níveis dinâmicos com base no histórico atualizado
         int nivelCenario1 = calcularNivelDinamicoCenario1(listaTercas, listaSabados, proximoTreinoData);
         int nivelCenario2 = calcularNivelDinamicoCenario2(listaTiros, mediaEficienciaTiros);
 
-        // 5. Executamos a classificação fisiológica real
-        String tipoEstimuloReal = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
-
-        // 6. Mapeamos o cenário e o nível detectado de forma dinâmica
-        int cenarioDetectado = tipoEstimuloReal.contains("TIROS") ? 2 : 1;
+        // 9. Mapeamos o cenário e o nível detectado de forma dinâmica para a sessão atual
+        int cenarioDetectado = ehTiro ? 2 : 1;
         int nivelDetectado = (cenarioDetectado == 2) ? nivelCenario2 : nivelCenario1;
 
-        // 7. Formatamos os históricos em texto para o prompt
-        String historicoTirosPrompt = formatarHistoricoParaPrompt(listaTiros, "Tiros de Quinta-Feira (Cenário 2, Nível 1)");
+        // 10. Formatamos os históricos em texto para o prompt
+        String historicoTirosPrompt = formatarHistoricoParaPrompt(listaTiros, "Tiros de Quinta-Feira (Cenário 2, Nível " + nivelCenario2 + ")");
         String historicoTercasPrompt = formatarHistoricoParaPrompt(listaTercas, "Rodagem Curta de Terça-Feira (Cenário 1, Nível 1)");
-        String historicoSabadosPrompt = formatarHistoricoParaPrompt(listaSabados, "Longão de Sábado (Cenário 1, Nível 2)");
+        String historicoSabadosPrompt = formatarHistoricoParaPrompt(listaSabados, "Longão de Sábado (Cenário 1, Nível " + nivelCenario1 + ")");
         String historicosUnificados = historicoTirosPrompt + "\n" + historicoTercasPrompt + "\n" + historicoSabadosPrompt;
 
-        // 8. Passamos o prompt com as médias e níveis exatos para o Gemini
+        // 11. Passamos o prompt estruturado com as médias e níveis exatos para o Gemini
         String prompt = buildProfessionalPrompt(name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null),
                 nivelCenario1, nivelCenario2, tipoEstimuloReal, historicosUnificados,
                 mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo);
@@ -124,7 +153,7 @@ public class InsightService {
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
 
-        // 9. Persiste os dados técnicos calculados no MySQL
+        // 12. Persiste os dados técnicos calculados oficialmente no MySQL
         self.persistirDadosTecnicos(activityId, activityDate, metrics, cleanResult, rawAiResponse, tipoEstimuloReal, cenarioDetectado, nivelDetectado);
 
         return sanitizeOutput(cleanResult);
@@ -191,16 +220,23 @@ public class InsightService {
             int targetLevel;
             if (targetScenario == 2) {
                 List<ActivitySummaryEntity> historicoTirosEntidades = activitySummaryRepository
-                        .findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(2, 1);
+                        .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
                 double mediaEficienciaTiros = calcularMediaEficienciaDaLista(historicoTirosEntidades, 5);
                 targetLevel = calcularNivelDinamicoCenario2(historicoTirosEntidades, mediaEficienciaTiros);
             } else {
-                // 🎯 BUSCAMOS AS LISTAS NA MEMÓRIA PARA O ESCOPO DESTE MÉTODO
-                List<ActivitySummaryEntity> listaTercas = activitySummaryRepository
-                        .findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(1, 1);
+                // 🎯 1. Busca os últimos treinos do Cenário 1 (Aeróbico) no banco de uma só vez
+                List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
+                        .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
 
-                List<ActivitySummaryEntity> listaSabados = activitySummaryRepository
-                        .findTop10ByDetectedScenarioAndDetectedLevelOrderByStartDateDesc(1, 2);
+                // 🎯 2. Separa na memória o que é Rodagem de Terça
+                List<ActivitySummaryEntity> listaTercas = listaCenario1.stream()
+                        .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
+                        .toList();
+
+                // 🎯 3. Separa na memória o que é Longão de Sábado
+                List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
+                        .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
+                        .toList();
 
                 // Convertemos a data agendada para String no formato esperado pelo seu método
                 String proximoTreinoDataStr = scheduledDate.format(DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy"));
@@ -291,6 +327,7 @@ public class InsightService {
             return 1;
         }
     }
+
     private int calcularNivelDinamicoCenario2(List<ActivitySummaryEntity> historicoTiros, double mediaEficienciaTiros) {
         if (historicoTiros.isEmpty() || historicoTiros.size() < 5) {
             log.info("[PROGRESSÃO] Atleta mantido no Nível 1. Histórico insuficiente de tiros (Possui: {} de 5 necessários).", historicoTiros.size());
@@ -299,17 +336,23 @@ public class InsightService {
 
         log.info("[PROGRESSÃO] Média de Eficiência Realizada (Últimos 5 Tiros): {}", String.format("%.3f", mediaEficienciaTiros));
 
+        // 🎯 Gatilhos alinhados rigorosamente com os limites max_promocao do JSON do MongoDB:
         if (mediaEficienciaTiros >= 1.15) {
+            log.info("[PROGRESSÃO CENÁRIO 2] Promovido/Mantido no Nível 5 (Teto de Densidade Máxima). Média: {} >= 1.15", String.format("%.3f", mediaEficienciaTiros));
             return 5;
         } else if (mediaEficienciaTiros >= 1.13) {
+            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 4 (10 repetições). Média: {} >= 1.13", String.format("%.3f", mediaEficienciaTiros));
             return 4;
-        } else if (mediaEficienciaTiros >= 1.11) {
+        } else if (mediaEficienciaTiros >= 1.10) {
+            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 3 (8 repetições - 1min30s). Média: {} >= 1.10", String.format("%.3f", mediaEficienciaTiros));
             return 3;
-        } else if (mediaEficienciaTiros >= 1.09) {
+        } else if (mediaEficienciaTiros >= 1.06) {
+            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 2 (8 repetições - 1min00s). Média: {} >= 1.06", String.format("%.3f", mediaEficienciaTiros));
             return 2;
         }
 
-        return mediaEficienciaTiros >= 1.06 ? 2 : 1;
+        log.info("[PROGRESSÃO CENÁRIO 2] Mantido no Nível 1 (6 repetições). Média: {} < 1.06", String.format("%.3f", mediaEficienciaTiros));
+        return 1;
     }
 
     private String classificarEstimuloFisiologico(List<StravaActivity.MinuteAnalysis> analysis, double stdDevGlobal, double fcMax, double fcMedia) {
@@ -317,9 +360,8 @@ public class InsightService {
             return "NÃO IDENTIFICADO (DADOS INSUFICIENTES)";
         }
 
-        int totalMinutos = analysis.size();
         int contagemJanelasInstaveis = 0;
-        int tamanhoJanela = 5;
+        int tamanhoJanela = 3;
 
         List<Double> frequencias = analysis.stream()
                 .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
@@ -330,28 +372,33 @@ public class InsightService {
             return "CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)";
         }
 
+        // 1. CONTAGEM DE PICO DE VARIABILIDADE (Threshold em 8.0 bpm)
         for (int i = 0; i <= frequencias.size() - tamanhoJanela; i++) {
             List<Double> subLista = frequencias.subList(i, i + tamanhoJanela);
 
             double mediaJanela = subLista.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-
             double varianciaJanela = subLista.stream()
                     .mapToDouble(fc -> Math.pow(fc - mediaJanela, 2))
                     .average()
                     .orElse(0.0);
-            double stdDevJanela = Math.sqrt(varianciaJanela);
 
-            if (stdDevJanela >= 8.5) {
+            // Se o desvio interno da janela excede 8.0 bpm, conta como 1 disparo
+            if (Math.sqrt(varianciaJanela) >= 8.0) {
                 contagemJanelasInstaveis++;
             }
         }
 
-        double proporcaoInstabilidade = (double) contagemJanelasInstaveis / (totalMinutos - tamanhoJanela + 1);
+        // 2. AMPLITUDE DE PULSO (Diferença entre o pico do tiro e a média geral)
+        double amplitudeCardiaca = fcMax - fcMedia;
 
-        log.info("[CLASSIFICADOR] Janelas instáveis detectadas: {} de {} | Proporção: {}%",
-                contagemJanelasInstaveis, (totalMinutos - tamanhoJanela + 1), String.format("%.1f", proporcaoInstabilidade * 100));
+        log.info("[CLASSIFICADOR] Picos instáveis (>8bpm): {} | Amplitude (Max - Média): {} bpm | StdDev Global: {} bpm",
+                contagemJanelasInstaveis,
+                String.format("%.1f", amplitudeCardiaca),
+                String.format("%.1f", stdDevGlobal));
 
-        if (proporcaoInstabilidade >= 0.15 || stdDevGlobal >= 11.0) {
+        // 🎯 3. REGRA SIMPLIFICADA E ASSERTIVA:
+        // Se teve pelo menos 6 disparos de alta variabilidade OU uma amplitude brutal (>= 20 bpm com pelo menos 3 disparos)
+        if (contagemJanelasInstaveis >= 6 || (amplitudeCardiaca >= 20.0 && contagemJanelasInstaveis >= 3)) {
             return "INTENSO / INTERVALADO (TIROS)";
         }
 
@@ -373,7 +420,6 @@ public class InsightService {
         int hrMax = activityService.getAthleteConfig().getHrMax();
         int hrRest = activityService.getAthleteConfig().getHrResting();
         boolean proximoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
-        double mediaEficienciaZ2Alvo = proximoEhSabado ? mediaEficienciaZ2Longo : mediaEficienciaZ2Curto;
 
         double histVo2Medio = historico.stream().mapToDouble(a -> 15.3 * ((a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMax) / (double) hrRest)).average().orElse(0.0);
         double histFcMaxMedia = historico.stream().mapToDouble(a -> a.getMaxHeartRate() != null ? a.getMaxHeartRate() : 0).average().orElse(0.0);
