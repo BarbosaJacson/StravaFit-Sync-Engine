@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -67,6 +68,8 @@ public class InsightService {
         this.nomeAtleta = nomeAtleta;
     }
 
+    public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {}
+
     @Transactional
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
         return generateInsight(
@@ -86,7 +89,9 @@ public class InsightService {
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior = workoutPrescriptionRepository.findTopByScheduledDateOrderByCreatedAtDesc(activityDate.toLocalDate());
 
         // 2. Classificamos o estímulo para saber qual cenário a sessão atual pertence
-        String tipoEstimuloReal = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
+        ClassificacaoResultado resultado = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
+        String tipoEstimuloReal = resultado.tipoEstimulo();
+        int janelasInstaveis = resultado.janelasInstaveis();
         boolean ehTiro = tipoEstimuloReal.contains("TIROS");
 
         // 3. Criamos a entidade da sessão atual em memória para garantir inclusão imediata no histórico do prompt
@@ -98,17 +103,27 @@ public class InsightService {
         treinoAtualVirtual.setAverageHeartRate(metrics.fcMedia());
         treinoAtualVirtual.setEfficiencyIndex(metrics.efficiencyIndex());
 
-        // 4. Buscamos os históricos existentes no MySQL por Cenário (Sem a trava do nível!)
+        // 4. Buscamos os históricos existentes no MySQL por Cenário
         List<ActivitySummaryEntity> listaTirosOriginal = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
 
         List<ActivitySummaryEntity> listaCenario1Original = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
 
-        // 5. Injetamos a atividade atual na memória e reordenamos por data (mais recente primeiro)
-        List<ActivitySummaryEntity> listaTiros = new ArrayList<>(listaTirosOriginal);
-        List<ActivitySummaryEntity> listaCenario1 = new ArrayList<>(listaCenario1Original);
+        // 5. Injetamos a atividade atual na memória limpando duplicatas de data ou ID
+        LocalDate dataHoje = activityDate.toLocalDate();
 
+        List<ActivitySummaryEntity> listaTiros = listaTirosOriginal.stream()
+                .filter(a -> a.getStartDate() == null || !a.getStartDate().toLocalDate().equals(dataHoje))
+                .filter(a -> a.getActivityId() == null || !a.getActivityId().equals(activityId))
+                .collect(Collectors.toList());
+
+        List<ActivitySummaryEntity> listaCenario1 = listaCenario1Original.stream()
+                .filter(a -> a.getStartDate() == null || !a.getStartDate().toLocalDate().equals(dataHoje))
+                .filter(a -> a.getActivityId() == null || !a.getActivityId().equals(activityId))
+                .collect(Collectors.toList());
+
+        // Adiciona a sessão virtual única no topo da lista correspondente
         if (ehTiro) {
             listaTiros.add(0, treinoAtualVirtual);
             listaTiros.sort(Comparator.comparing(ActivitySummaryEntity::getStartDate).reversed());
@@ -126,7 +141,7 @@ public class InsightService {
                 .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
                 .toList();
 
-        // 7. Cálculo cirúrgico das médias de eficiência incluindo o treino de hoje!
+        // 7. Cálculo das médias de eficiência incluindo o treino de hoje
         double mediaEficienciaZ2Curto = calcularMediaEficienciaDaLista(listaTercas, 5);
         double mediaEficienciaZ2Longo = calcularMediaEficienciaDaLista(listaSabados, 5);
         double mediaEficienciaTiros = calcularMediaEficienciaDaLista(listaTiros, 5);
@@ -145,10 +160,40 @@ public class InsightService {
         String historicoSabadosPrompt = formatarHistoricoParaPrompt(listaSabados, "Longão de Sábado (Cenário 1, Nível " + nivelCenario1 + ")");
         String historicosUnificados = historicoTirosPrompt + "\n" + historicoTercasPrompt + "\n" + historicoSabadosPrompt;
 
-        // 11. Passamos o prompt estruturado com as médias e níveis exatos para o Gemini
+        // 🎯 10.1 LINHA DO TEMPO CRONOLÓGICA GLOBAL
+        List<ActivitySummaryEntity> historicoGlobalFiltrado = new ArrayList<>();
+        historicoGlobalFiltrado.addAll(listaTiros);
+        historicoGlobalFiltrado.addAll(listaCenario1);
+
+        historicoGlobalFiltrado.sort(Comparator.comparing(ActivitySummaryEntity::getStartDate).reversed());
+
+        StringBuilder sbHistoricoGlobal = new StringBuilder();
+        for (ActivitySummaryEntity act : historicoGlobalFiltrado.stream().limit(9).toList()) {
+            String tipoTreino = (act.getDetectedScenario() != null && act.getDetectedScenario() == 2) ? "TIROS" : "Z2 / RODAGEM";
+            double ef = (act.getEfficiencyIndex() != null) ? act.getEfficiencyIndex() : metrics.efficiencyIndex();
+            double fc = (act.getAverageHeartRate() != null) ? act.getAverageHeartRate() : metrics.fcMedia();
+
+            sbHistoricoGlobal.append(String.format("• Data: %s (%s) | Efficiency: %.3f | FC Méd: %.0f bpm\n",
+                    act.getStartDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+                    tipoTreino,
+                    ef,
+                    fc));
+
+            // 🎯 Injeta o resumo textual do diagnóstico anterior se existir no MySQL
+            if (act.getAiAnalysisSummary() != null && !act.getAiAnalysisSummary().isBlank()) {
+                sbHistoricoGlobal.append("  [Diagnóstico Anterior]: ")
+                        .append(act.getAiAnalysisSummary().replaceAll("\n", " "))
+                        .append("\n");
+            }
+            sbHistoricoGlobal.append("\n");
+        }
+
+        String historicoPerformanceGlobal = sbHistoricoGlobal.toString();
+
+        // 11. Passamos o prompt estruturado com todas as variáveis instanciadas
         String prompt = buildProfessionalPrompt(name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null),
-                nivelCenario1, nivelCenario2, tipoEstimuloReal, historicosUnificados,
-                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo);
+                nivelCenario1, nivelCenario2, tipoEstimuloReal, janelasInstaveis, historicosUnificados,
+                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo, historicoPerformanceGlobal);
 
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
@@ -214,7 +259,6 @@ public class InsightService {
             prescription.setMethod(extractTagValue(xml, "method"));
             prescription.setRawGeminiResponse(rawAiResponse);
 
-            // 🎯 LÓGICA DE DETECÇÃO AUTOMÁTICA DE CENÁRIO ALVO
             int targetScenario = (scheduledDate.getDayOfWeek() == DayOfWeek.THURSDAY) ? 2 : 1;
 
             int targetLevel;
@@ -224,24 +268,18 @@ public class InsightService {
                 double mediaEficienciaTiros = calcularMediaEficienciaDaLista(historicoTirosEntidades, 5);
                 targetLevel = calcularNivelDinamicoCenario2(historicoTirosEntidades, mediaEficienciaTiros);
             } else {
-                // 🎯 1. Busca os últimos treinos do Cenário 1 (Aeróbico) no banco de uma só vez
                 List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
                         .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
 
-                // 🎯 2. Separa na memória o que é Rodagem de Terça
                 List<ActivitySummaryEntity> listaTercas = listaCenario1.stream()
                         .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
                         .toList();
 
-                // 🎯 3. Separa na memória o que é Longão de Sábado
                 List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
                         .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
                         .toList();
 
-                // Convertemos a data agendada para String no formato esperado pelo seu método
                 String proximoTreinoDataStr = scheduledDate.format(DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy"));
-
-                // Agora sim! Todas as variáveis existem neste escopo 🚀
                 targetLevel = calcularNivelDinamicoCenario1(listaTercas, listaSabados, proximoTreinoDataStr);
             }
 
@@ -260,16 +298,13 @@ public class InsightService {
         boolean proximoTreinoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
 
         if (proximoTreinoEhSabado) {
-            // 🏃‍♂️ SÁBADO (LONGÃO): Trilho Progressivo Amarrado à Distância Conquistada
             if (listaSabados.isEmpty()) {
-                return 2; // Seu ponto de partida real de hoje (12 km) conforme sua planilha de treino
+                return 2;
             }
 
-            // 1. Pegamos a distância exata executada no último sábado registrado
             ActivitySummaryEntity ultimoSabado = listaSabados.get(0);
             double ultimaDistanciaKm = ultimoSabado.getDistanceKm() != null ? ultimoSabado.getDistanceKm() : 0.0;
 
-            // 2. Calculamos a média móvel das últimas sessões de longão para avaliar consistência cardiovascular
             double mediaSabados = listaSabados.stream()
                     .limit(5)
                     .mapToDouble(ActivitySummaryEntity::getEfficiencyIndex)
@@ -279,50 +314,32 @@ public class InsightService {
             log.info("[PROGRESSÃO SÁBADO] Última distância realizada: {} km | Média de Eficiência: {}",
                     String.format("%.2f", ultimaDistanciaKm), String.format("%.3f", mediaSabados));
 
-            // 3. Lógica Sequencial Estrita com else-if (Evita duplicidade e caminhos de código impossíveis)
-
-            // Se o último treino foi na faixa de 12km (Nível 2)
             if (ultimaDistanciaKm >= 11.5 && ultimaDistanciaKm < 13.5) {
-                // META DO JSON DO NÍVEL 2 PARA PROMOÇÃO: >= 1.08
                 if (mediaSabados >= 1.08 && listaSabados.size() >= 4) {
                     log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 2 para o Nível 3 (14km). Média: {} >= 1.08", String.format("%.3f", mediaSabados));
                     return 3;
                 }
                 log.info("[PROGRESSÃO SÁBADO] Mantido no Nível 2 (12km). Média de eficiência atual ({}) ainda não atingiu a meta de 1.08.", String.format("%.3f", mediaSabados));
                 return 2;
-            }
-
-            // Se o último treino foi na faixa de 14km (Nível 3)
-            else if (ultimaDistanciaKm >= 13.5 && ultimaDistanciaKm < 14.5) {
-                // META DO JSON DO NÍVEL 3 PARA PROMOÇÃO: >= 1.06
+            } else if (ultimaDistanciaKm >= 13.5 && ultimaDistanciaKm < 14.5) {
                 if (mediaSabados >= 1.06 && listaSabados.size() >= 4) {
                     log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 3 para o Nível 4 (15km). Média: {} >= 1.06", String.format("%.3f", mediaSabados));
                     return 4;
                 }
                 return 3;
-            }
-
-            // Se o último treino foi na faixa de 15km (Nível 4)
-            else if (ultimaDistanciaKm >= 14.5 && ultimaDistanciaKm < 15.5) {
-                // META DO JSON DO NÍVEL 4 PARA PROMOÇÃO: >= 1.04
+            } else if (ultimaDistanciaKm >= 14.5 && ultimaDistanciaKm < 15.5) {
                 if (mediaSabados >= 1.04 && listaSabados.size() >= 4) {
                     log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 4 para o Nível 5 (16km). Média: {} >= 1.04", String.format("%.3f", mediaSabados));
                     return 5;
                 }
                 return 4;
-            }
-
-            // Se o último treino já foi na faixa do teto de 16km (Nível 5)
-            else if (ultimaDistanciaKm >= 15.5) {
+            } else if (ultimaDistanciaKm >= 15.5) {
                 log.info("[PROGRESSÃO SÁBADO] Atleta estabilizado no teto do ciclo (Nível 5 - 16km).");
                 return 5;
             }
 
-            // Fallback de segurança para não deixar o fluxo solto
             return 2;
-
         } else {
-            // 🏃‍♂️ TERÇA-FEIRA (RODAGEM CURTA): Sempre travada no Nível 1 (7km - 10km) para controle de carga semanal!
             log.info("[PROGRESSÃO TERÇA] Retornando Nível 1 Fixo (Âncora de Manutenção Aeróbica).");
             return 1;
         }
@@ -336,7 +353,6 @@ public class InsightService {
 
         log.info("[PROGRESSÃO] Média de Eficiência Realizada (Últimos 5 Tiros): {}", String.format("%.3f", mediaEficienciaTiros));
 
-        // 🎯 Gatilhos alinhados rigorosamente com os limites max_promocao do JSON do MongoDB:
         if (mediaEficienciaTiros >= 1.15) {
             log.info("[PROGRESSÃO CENÁRIO 2] Promovido/Mantido no Nível 5 (Teto de Densidade Máxima). Média: {} >= 1.15", String.format("%.3f", mediaEficienciaTiros));
             return 5;
@@ -355,9 +371,9 @@ public class InsightService {
         return 1;
     }
 
-    private String classificarEstimuloFisiologico(List<StravaActivity.MinuteAnalysis> analysis, double stdDevGlobal, double fcMax, double fcMedia) {
+    private ClassificacaoResultado classificarEstimuloFisiologico(List<StravaActivity.MinuteAnalysis> analysis, double stdDevGlobal, double fcMax, double fcMedia) {
         if (analysis == null || analysis.size() < 5) {
-            return "NÃO IDENTIFICADO (DADOS INSUFICIENTES)";
+            return new ClassificacaoResultado("NÃO IDENTIFICADO (DADOS INSUFICIENTES)", 0);
         }
 
         int contagemJanelasInstaveis = 0;
@@ -369,10 +385,9 @@ public class InsightService {
                 .toList();
 
         if (frequencias.size() < tamanhoJanela) {
-            return "CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)";
+            return new ClassificacaoResultado("CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)", 0);
         }
 
-        // 1. CONTAGEM DE PICO DE VARIABILIDADE (Threshold em 8.0 bpm)
         for (int i = 0; i <= frequencias.size() - tamanhoJanela; i++) {
             List<Double> subLista = frequencias.subList(i, i + tamanhoJanela);
 
@@ -382,13 +397,11 @@ public class InsightService {
                     .average()
                     .orElse(0.0);
 
-            // Se o desvio interno da janela excede 8.0 bpm, conta como 1 disparo
             if (Math.sqrt(varianciaJanela) >= 8.0) {
                 contagemJanelasInstaveis++;
             }
         }
 
-        // 2. AMPLITUDE DE PULSO (Diferença entre o pico do tiro e a média geral)
         double amplitudeCardiaca = fcMax - fcMedia;
 
         log.info("[CLASSIFICADOR] Picos instáveis (>8bpm): {} | Amplitude (Max - Média): {} bpm | StdDev Global: {} bpm",
@@ -396,23 +409,24 @@ public class InsightService {
                 String.format("%.1f", amplitudeCardiaca),
                 String.format("%.1f", stdDevGlobal));
 
-        // 🎯 3. REGRA SIMPLIFICADA E ASSERTIVA:
-        // Se teve pelo menos 6 disparos de alta variabilidade OU uma amplitude brutal (>= 20 bpm com pelo menos 3 disparos)
         if (contagemJanelasInstaveis >= 6 || (amplitudeCardiaca >= 20.0 && contagemJanelasInstaveis >= 3)) {
-            return "INTENSO / INTERVALADO (TIROS)";
+            return new ClassificacaoResultado("INTENSO / INTERVALADO (TIROS)", contagemJanelasInstaveis);
         }
 
-        return "CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)";
+        return new ClassificacaoResultado("CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)", contagemJanelasInstaveis);
     }
 
-    private String buildProfessionalPrompt(String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData, WorkoutPrescriptionEntity prescricaoAnterior,
+    private String buildProfessionalPrompt(String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData,
+                                           WorkoutPrescriptionEntity prescricaoAnterior,
                                            int nivelCenario1,
                                            int nivelCenario2,
                                            String tipoEstimuloReal,
+                                           int janelasInstaveis,
                                            String historicosUnificados,
                                            double mediaEficienciaTiros,
                                            double mediaEficienciaZ2Curto,
-                                           double mediaEficienciaZ2Longo) {
+                                           double mediaEficienciaZ2Longo,
+                                           String historicoPerformanceGlobal) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext();
         List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
@@ -438,7 +452,8 @@ public class InsightService {
         sb.append("ATENÇÃO IA, NÃO TENTE ADIVINHAR O TIPO DE TREINO. O SISTEMA ANALISOU OS DADOS TEMPORAIS MINUTO A MINUTO E CONSOLIDOU O SEGUINTE FATO:\n");
         sb.append("- TIPO DE ESTÍMULO EXECUTADO HOJE: ").append(tipoEstimuloReal).append("\n");
         sb.append("- DESVIO PADRÃO DA FC DO TREINO: ").append(String.format("%.2f", metrics.stdDev())).append(" bpm\n");
-        sb.append("- INSTRUÇÃO DE ANÁLISE: Se o estímulo foi classificado como 'INTENSO / INTERVALADO (TIROS)', você deve obrigatoriamente acionar o 'CENÁRIO 2' para o diagnóstico. Se foi 'CONTÍNUO / ESTÁVEL', utilize obrigatoriamente o 'CENÁRIO 1'.\n\n");
+        sb.append("- JANELAS MÓVEIS INSTÁVEIS (3m, Desvio >= 8.0 bpm): ").append(janelasInstaveis).append(" disparos identificados\n");
+        sb.append("- INSTRUÇÃO DE ANÁLISE: Se o estímulo foi classificado como 'INTENSO / INTERVALADO (TIROS)', você deve obrigatoriamente acionar o 'CENÁRIO 2' para o diagnóstico e justificar utilizando o desvio padrão e o fato de ter encontrado ").append(janelasInstaveis).append(" janelas móveis com forte oscilação cardíaca. Se foi 'CONTÍNUO / ESTÁVEL', utilize obrigatoriamente o 'CENÁRIO 1'.\n\n");
 
         if (scientificContext != null && !scientificContext.isBlank()) {
             sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO E DIRETRIZES DO MONGODB ---\n");
@@ -465,6 +480,7 @@ public class InsightService {
         sb.append("- Nível Atual no Cenário 1 (Rodagens/Longão): NÍVEL ").append(nivelCenario1).append("\n");
         sb.append("- Nível Atual no Cenário 2 (Tiros de Quinta): NÍVEL ").append(nivelCenario2).append("\n");
         sb.append("REGRA INVIOLÁVEL: Você está ESTRITAMENTE PROIBIDA de recalcular, alterar, promover ou rebaixar o nível determinado acima. Sua única tarefa é ler as regras do NÍVEL indicado e usá-las na Seção 6.0.\n\n");
+
         sb.append("3. NUTRIÇÃO E DESCANSO (SEÇÃO 5.0):\n");
         sb.append("   - Consulte os documentos de 'NUTRITION' e 'REST' do MongoDB.\n");
         sb.append("   - Se o treino de hoje foi de baixa intensidade (Z2), use estritamente as diretrizes de 'light_moderated_days'.\n");
@@ -473,16 +489,15 @@ public class InsightService {
         sb.append("4. 📅 PRESCRIÇÃO STRAFIT PREDICT (SEÇÃO 6.0):\n");
         sb.append("   - Identifique o dia da semana correspondente ao próximo treino agendado em: ").append(proximoTreinoData.toUpperCase()).append("\n");
         sb.append("   - SE O PRÓXIMO TREINO FOR UMA QUINTA-FEIRA (THURSDAY):\n");
-        sb.append("     * Você deve obrigatoriamente prescrever o 'CENÁRIO 2' (Tiros/Intervalado).\n");
-        sb.append("     * DADO REAL DO SISTEMA: A média real do Efficiency Index do atleta nos últimos 5 treinos de tiros é: ")
+        sb.append("     * Você deve obrigatoriamente prescrever o 'CENÁRIO 2' (Tiros / VO2máx).\n");
+        sb.append("     * DADO REAL DO SISTEMA: A média real do Efficiency Index do atleta nas últimas sessões de tiros é: ")
                 .append(String.format("%.3f", mediaEficienciaTiros)).append("\n");
-        sb.append("     * INSTRUÇÃO DE PROGRESSÃO DINÂMICA:\n");
-        sb.append("       1. Vá até o JSON do 'CENÁRIO 2' no MongoDB e localize as regras de 'gatilho_promocao' para o nível atual do atleta.\n");
-        sb.append("       2. Compare a média real fornecida acima (")
-                .append(String.format("%.3f", mediaEficienciaTiros))
-                .append(") com o 'valor_estavel' exigido no gatilho do MongoDB.\n");
-        sb.append("       3. Se a média real for maior ou igual (GREATER_THAN_OR_EQUAL) ao valor estipulado no MongoDB, prescreva o nível subsequente.\n");
-        sb.append("       4. Caso contrário, mantenha a prescrição rigorosamente no nível atual, estruturando o treino com os dados do nível vigente no MongoDB.\n\n");
+        sb.append("     * INSTRUÇÃO DE SELEÇÃO E PROGRESSÃO DINÂMICA (JSON CENÁRIO 2):\n");
+        sb.append("       1. Acesse o NÍVEL ATUAL do atleta no JSON do 'CENÁRIO 2' (Nível ").append(nivelCenario2).append(").\n");
+        sb.append("       2. SELEÇÃO DA VARIAÇÃO INTERNA: Dentro do Nível ").append(nivelCenario2).append(", analise a lista de 'variacoes_estimulo' (V1, V2, V3, V4) e escolha EXATAMENTE a variação cujo 'criterio_ia' contemple a média real do atleta (")
+                .append(String.format("%.3f", mediaEficienciaTiros)).append("). Prescreva a quantidade exata de repetições, tempo_tiro e tempo_recuperacao indicados nessa variação.\n");
+        sb.append("       3. AVALIAÇÃO DE PROMOÇÃO DE NÍVEL: Verifique as regras de 'gatilho_promocao' no JSON. Se o atleta sustentar a média real >= 'min_sustentada' (conforme o critério de sessões consecutivas no histórico), informe a promoção do atleta para o Nível subsequente no texto do diagnóstico.\n");
+        sb.append("       4. Justifique explicitamente na Seção 6.0 o motivo técnico da escolha da Variação (V1, V2, V3 ou V4) com base na faixa do Efficiency Index de ").append(String.format("%.3f", mediaEficienciaTiros)).append(".\n\n");
 
         sb.append("   - SE O PRÓXIMO TREINO FOR UMA TERÇA (TUESDAY) OU SÁBADO (SATURDAY):\n");
         sb.append("     * Você deve obrigatoriamente prescrever o 'CENÁRIO 1' (Corrida Aeróbica Contínua / Eficiência Metabólica).\n\n");
@@ -498,7 +513,7 @@ public class InsightService {
             sb.append("       - Use a média específica dos longões (")
                     .append(String.format("%.3f", mediaEficienciaZ2Longo))
                     .append(") para analisar a proximidade do atleta com o gatilho de promoção do Nível ").append(nivelCenario1)
-                    .append("       - Explique fisiologicamente ao atleta o seu estado atual dentro deste nível, confrontando seu Efficiency Index com o 'valor_estavel' exigido no JSON do MongoDB para este volume específico, reforçando que a progressão de distância é estritamente sequencial.\n");
+                    .append("\n       - Explique fisiologicamente ao atleta o seu estado atual dentro deste nível, confrontando seu Efficiency Index com o 'valor_estavel' exigido no JSON do MongoDB para este volume específico, reforçando que a progressão de distância é estritamente sequencial.\n");
         } else {
             sb.append("       - O próximo treino é TERÇA-FEIRA (RODAGEM CURTA). Você deve obrigatoriamente prescrever o NÍVEL ").append(nivelCenario1).append(".\n");
             sb.append("       - IMPORTANTE: As terças-feiras são âncoras de recuperação e controle de carga semanal. Por isso, o ideal é manter o treino no Nível 1 (7 a 10 km) para evitar fadiga crônica residual.\n");
@@ -556,7 +571,7 @@ public class InsightService {
         }
         sb.append("\n\n");
 
-        sb.append("\n--- HISTÓRICO DE PERFORMANCE SEGMENTADO (ÚLTIMOS 5 RESULTADOS) ---\n");
+        sb.append("--- HISTÓRICO DE PERFORMANCE SEGMENTADO (ÚLTIMOS 5 RESULTADOS) ---\n");
         sb.append("Use estes dados reais do MySQL para avaliar a proximidade do atleta com o gatilho de promoção:\n");
         sb.append(historicosUnificados).append("\n");
 
@@ -577,7 +592,7 @@ public class InsightService {
         sb.append("1.0 - 📋 STATUS DO TREINO (CUMPRIMENTO DO PLANO):\n");
         sb.append("REGRA DE STATUS: Analise se o atleta cumpriu o volume (tempo/distância) e a intensidade (zona de FC) planejados no treino anterior.\n");
         sb.append("Comece a seção obrigatoriamente imprimindo uma destas três classificações em maiúsculas:\n");
-        sb.append("- [STATUS: CUMPRIDO] (Se cumpriu volume e intensidade dentro de uma margem of 10%)\n");
+        sb.append("- [STATUS: CUMPRIDO] (Se cumpriu volume e intensidade dentro de uma margem de 10%)\n");
         sb.append("- [STATUS: CUMPRIDO PARCIALMENTE] (Se errou o volume por mais de 10% mas manteve a intensidade correta, ou vice-versa)\n");
         sb.append("- [STATUS: NÃO CUMPRIDO] (Se errou severamente tanto a intensidade quanto o volume)\n");
         sb.append("[Após o status, escreva em texto corrido a justificativa técnica fisiológica do cumprimento ou desvio do plano]\n\n");
@@ -589,7 +604,13 @@ public class InsightService {
         sb.append("[Analise a economia de corrida e o comportamento de fadiga (Pace Drift) do treino atual]\n\n");
 
         sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n");
-        sb.append("[Gere uma conclusão encorajadora focada na Meia Maratona de 01/11/2026, destacando a importância do cumprimento do plano]\n\n");
+        sb.append("--- CONTEXTO HISTÓRICO DE LEITURA (ÚLTIMAS ATIVIDADES GLOBAIS) ---\n");
+        sb.append(historicoPerformanceGlobal).append("\n");
+        sb.append("--- INSTRUÇÃO DE ANÁLISE PARA A SEÇÃO 4.0 ---\n");
+        sb.append("• Utilize o histórico cronológico de atividades e diagnósticos acima APENAS como base de conhecimento interna para avaliar a evolução ou involução do atleta.\n");
+        sb.append("• NÃO imprima a lista de treinos acima na resposta final do Telegram.\n");
+        sb.append("• Escreva em texto corrido um parecer técnico discricionário comparando o rendimento de HOJE com o histórico recente (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
+        sb.append("• Encerre com uma mensagem encorajadora e alinhada à preparação para a Meia Maratona de 01/11/2026.\n\n");
 
         sb.append("5.0 - 🍽️ NUTRIÇÃO / DESCANSO 💤\n");
         sb.append("[Prescreva a estratégia detalhada de alimentação pré e pós treino com as opções sugeridas no MongoDB (incluindo as fontes alimentares específicas, o alerta de antioxidantes sintéticos na NOX2 se for tiros, e os tempos de repouso muscular de 4h e de transição/intervalos entre estímulos)]\n\n");
@@ -729,7 +750,6 @@ public class InsightService {
         }
     }
 
-    // 🎯 Método utilitário focado em calcular médias diretamente das listas da memória (Reuso perfeito!)
     private double calcularMediaEficienciaDaLista(List<ActivitySummaryEntity> lista, int limiteItens) {
         if (lista == null || lista.isEmpty()) {
             return 0.0;
@@ -741,7 +761,6 @@ public class InsightService {
                 .orElse(0.0);
     }
 
-    // 🎯 Método utilitário focado em formatar texto das listas da memória (Sem queries adicionais!)
     private String formatarHistoricoParaPrompt(List<ActivitySummaryEntity> historico, String rotuloTreino) {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("--- HISTÓRICO DE %s ---\n", rotuloTreino.toUpperCase()));
