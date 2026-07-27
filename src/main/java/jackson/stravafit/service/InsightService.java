@@ -443,107 +443,64 @@ public class InsightService {
 
         StringBuilder sb = new StringBuilder();
 
+        // =================================================================
+        // ZONA 1: INSTRUÇÕES E DADOS PRIVADOS DO SISTEMA (A IA LÊ, MAS NÃO IMPRIME)
+        // =================================================================
         sb.append("VOCÊ É UM ANALISTA DE PERFORMANCE DE ELITE E FISIOLOGISTA DE CORRIDA DO PROJETO STRAVAFIT.\n");
         sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO SEGUINDO A MATRIZ DE CONHECIMENTO, PRESCREVER A RECUPERAÇÃO TÉCNICA E GERAR A PRÓXIMA PRESCRIÇÃO.\n\n");
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
 
         sb.append("--- CLASSIFICAÇÃO FISIOLÓGICA REAL DA ATIVIDADE (CÁLCULO MATEMÁTICO DO SISTEMA) ---\n");
-        sb.append("ATENÇÃO IA, NÃO TENTE ADIVINHAR O TIPO DE TREINO. O SISTEMA ANALISOU OS DADOS TEMPORAIS MINUTO A MINUTO E CONSOLIDOU O SEGUINTE FATO:\n");
         sb.append("- TIPO DE ESTÍMULO EXECUTADO HOJE: ").append(tipoEstimuloReal).append("\n");
         sb.append("- DESVIO PADRÃO DA FC DO TREINO: ").append(String.format("%.2f", metrics.stdDev())).append(" bpm\n");
         sb.append("- JANELAS MÓVEIS INSTÁVEIS (3m, Desvio >= 8.0 bpm): ").append(janelasInstaveis).append(" disparos identificados\n");
-        sb.append("- INSTRUÇÃO DE ANÁLISE: Se o estímulo foi classificado como 'INTENSO / INTERVALADO (TIROS)', você deve obrigatoriamente acionar o 'CENÁRIO 2' para o diagnóstico e justificar utilizando o desvio padrão e o fato de ter encontrado ").append(janelasInstaveis).append(" janelas móveis com forte oscilação cardíaca. Se foi 'CONTÍNUO / ESTÁVEL', utilize obrigatoriamente o 'CENÁRIO 1'.\n\n");
+        sb.append("- INSTRUÇÃO DE CENÁRIO: Se o estímulo foi 'INTENSO / INTERVALADO (TIROS)', acione o 'CENÁRIO 2'. Se foi 'CONTÍNUO / ESTÁVEL', acione o 'CENÁRIO 1'.\n\n");
 
         if (scientificContext != null && !scientificContext.isBlank()) {
             sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO E DIRETRIZES DO MONGODB ---\n");
             sb.append(scientificContext).append("\n\n");
         }
 
+        // 🔒 HISTÓRICO PERMANECE AQUI NA ÁREA PRIVADA PARA EMBASAR A SEÇÃO 4.0
+        sb.append("--- CONTEXTO HISTÓRICO DE LEITURA INTERNA (ÚLTIMAS ATIVIDADES GLOBAIS) ---\n");
+        sb.append("ATENÇÃO IA: Use o histórico abaixo APENAS como base de conhecimento interna para avaliar a evolução na Seção 4.0. É PROIBIDO IMPRIMIR ESTE BLOCO NO TELEGRAM:\n");
+        sb.append(historicoPerformanceGlobal).append("\n\n");
+
         sb.append("--- DADOS DO TREINO ATUAL ---\n");
         sb.append("DADOS DO TREINO: ").append(name).append(" | ").append(String.format("%.1f km", metrics.safeDistance())).append(" | Pace Médio: ").append(metrics.paceFormatted()).append("\n");
         sb.append("DURACAO: ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append("\n");
         sb.append("DESVIO PADRÃO DA FC: ").append(String.format("%.1f", metrics.stdDev())).append(" bpm | COMPORTAMENTO CARDÍACO: ").append(metrics.comportamento()).append("\n\n");
 
-        sb.append("--- INSTRUÇÕES CRUCIAIS PARA A IA ---\n");
-        sb.append("1. IDENTIFICAÇÃO DO CENÁRIO:\n");
-        sb.append("   - Leia as regras de aplicabilidade do 'CENARIO 1' (Eficiência Metabólica) e 'CENARIO 2' (Intensidade - Tiros).\n");
-        sb.append("   - Identifique qual cenário se aplica ao treino executado hoje. Use o título exato do cenário no campo '📌 Cenário Detectado'.\n\n");
-
-        sb.append("2. DIAGNÓSTICO TÉCNICO FISIOLÓGICO (SEÇÃO 2.0):\n");
-        sb.append("   - Identifique o nível atual do atleta no cenário mapeado (por exemplo, correlacione o volume/tempo com os níveis descritos no Cenário).\n");
-        sb.append("   - Avalie o 'Efficiency Index' atual de ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" com base na tabela de 'legendas_eficiencia' do cenário identificado.\n");
-        sb.append("   - Use o texto e a argumentação dos 'diagnosticos_clinicos' do cenário identificado no MongoDB como base direta para redigir o diagnóstico técnico, citando as referências científicas do arquivo (ex: San-Millán & Brooks, Seiler ou Casanova et al.).\n\n");
-
         sb.append("--- NÍVEIS DE PROGRESSÃO ATUAIS DO ATLETA (CÁLCULO MATEMÁTICO MANDATÓRIO) ---\n");
-        sb.append("ATENÇÃO IA: O sistema analisou o histórico no MySQL e determinou os seguintes níveis mandatórios:\n");
         sb.append("- Nível Atual no Cenário 1 (Rodagens/Longão): NÍVEL ").append(nivelCenario1).append("\n");
         sb.append("- Nível Atual no Cenário 2 (Tiros de Quinta): NÍVEL ").append(nivelCenario2).append("\n");
-        sb.append("REGRA INVIOLÁVEL: Você está ESTRITAMENTE PROIBIDA de recalcular, alterar, promover ou rebaixar o nível determinado acima. Sua única tarefa é ler as regras do NÍVEL indicado e usá-las na Seção 6.0.\n\n");
+        sb.append("REGRA INVIOLÁVEL: Você está ESTRITAMENTE PROIBIDA de recalcular, alterar, promover ou rebaixar o nível determinado acima.\n\n");
 
-        sb.append("3. NUTRIÇÃO E DESCANSO (SEÇÃO 5.0):\n");
-        sb.append("   - Consulte os documentos de 'NUTRITION' e 'REST' do MongoDB.\n");
-        sb.append("   - Se o treino de hoje foi de baixa intensidade (Z2), use estritamente as diretrizes de 'light_moderated_days'.\n");
-        sb.append("   - Se o treino de hoje foi de alta intensidade (Tiros/HIIT), use estritamente as diretrizes de 'high_intensity_days' (incluindo o alerta crítico de evitar megadoses de antioxidantes sintéticos para preservar a adaptação hormética pela via NOX2) e os protocolos de regeneração do documento 'REST'.\n\n");
+        sb.append("--- DADOS DE PRESCRIÇÃO E DIRETRIZES DO MONGODB ---\n");
+        sb.append("Próximo Treino Agendado: ").append(proximoTreinoData.toUpperCase()).append("\n");
+        sb.append("Média Real Tiros (Quintas): ").append(String.format("%.3f", mediaEficienciaTiros)).append("\n");
+        sb.append("Média Real Rodagem (Terças): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append("\n");
+        sb.append("Média Real Longão (Sábados): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append("\n\n");
 
-        sb.append("4. 📅 PRESCRIÇÃO STRAFIT PREDICT (SEÇÃO 6.0):\n");
-        sb.append("   - Identifique o dia da semana correspondente ao próximo treino agendado em: ").append(proximoTreinoData.toUpperCase()).append("\n");
-        sb.append("   - SE O PRÓXIMO TREINO FOR UMA QUINTA-FEIRA (THURSDAY):\n");
-        sb.append("     * Você deve obrigatoriamente prescrever o 'CENÁRIO 2' (Tiros / VO2máx).\n");
-        sb.append("     * DADO REAL DO SISTEMA: A média real do Efficiency Index do atleta nas últimas sessões de tiros é: ")
-                .append(String.format("%.3f", mediaEficienciaTiros)).append("\n");
-        sb.append("     * INSTRUÇÃO DE SELEÇÃO E PROGRESSÃO DINÂMICA (JSON CENÁRIO 2):\n");
-        sb.append("       1. Acesse o NÍVEL ATUAL do atleta no JSON do 'CENÁRIO 2' (Nível ").append(nivelCenario2).append(").\n");
-        sb.append("       2. SELEÇÃO DA VARIAÇÃO INTERNA: Dentro do Nível ").append(nivelCenario2).append(", analise a lista de 'variacoes_estimulo' (V1, V2, V3, V4) e escolha EXATAMENTE a variação cujo 'criterio_ia' contemple a média real do atleta (")
-                .append(String.format("%.3f", mediaEficienciaTiros)).append("). Prescreva a quantidade exata de repetições, tempo_tiro e tempo_recuperacao indicados nessa variação.\n");
-        sb.append("       3. AVALIAÇÃO DE PROMOÇÃO DE NÍVEL: Verifique as regras de 'gatilho_promocao' no JSON. Se o atleta sustentar a média real >= 'min_sustentada' (conforme o critério de sessões consecutivas no histórico), informe a promoção do atleta para o Nível subsequente no texto do diagnóstico.\n");
-        sb.append("       4. Justifique explicitamente na Seção 6.0 o motivo técnico da escolha da Variação (V1, V2, V3 ou V4) com base na faixa do Efficiency Index de ").append(String.format("%.3f", mediaEficienciaTiros)).append(".\n\n");
+        // =================================================================
+        // 🚨 DIVISOR IMPERATIVO: A PARTIR DAQUI É APENAS O TEMPLATE DO TELEGRAM
+        // =================================================================
+        sb.append("=================================================================\n");
+        sb.append("🚨 DIRECTIVE DE SAÍDA EXCLUSIVA (ESTRITO CUMPRIMENTO MANDATÓRIO) 🚨\n");
+        sb.append("=================================================================\n");
+        sb.append("ATENÇÃO IA: IGNORE A IMPRESSÃO DE TUDO O QUE FOI LIDO ACIMA.\n");
+        sb.append("Sua resposta para o usuário/Telegram DEVE COMEÇAR EXATAMENTE na linha '🏃‍♂️ StravaFit IA...'.\n");
+        sb.append("É ESTRITAMENTE PROIBIDO incluir logs, historicosUnificados ou historicoPerformanceGlobal na resposta.\n");
+        sb.append("RENDERIZE APENAS A ESTRUTURA A SEGUIR:\n\n");
 
-        sb.append("   - SE O PRÓXIMO TREINO FOR UMA TERÇA (TUESDAY) OU SÁBADO (SATURDAY):\n");
-        sb.append("     * Você deve obrigatoriamente prescrever o 'CENÁRIO 1' (Corrida Aeróbica Contínua / Eficiência Metabólica).\n\n");
-
-        sb.append("     * DADOS REAIS DE CONTEXTO METABÓLICO DO ATLETA:\n");
-        sb.append("       - Última Distância Realizada em Longão de Sábado: ").append(String.format("%.2f km", metrics.safeDistance())).append("\n");
-        sb.append("       - Média Real de Eficiência nas RODAGENS DE TERÇA (Últimos 5 treinos): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append("\n");
-        sb.append("       - Média Real de Eficiência nos LONGÕES DE SÁBADO (Últimos 5 treinos): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append("\n\n");
-
-        sb.append("     * REGRA DE PRESCRIÇÃO MANDATÓRIA BASEADA NO DIA DA SEMANA:\n");
-        if (proximoEhSabado) {
-            sb.append("       - O próximo treino é SÁBADO (LONGÃO). Você deve obrigatoriamente prescrever o NÍVEL ").append(nivelCenario1).append(".\n");
-            sb.append("       - Use a média específica dos longões (")
-                    .append(String.format("%.3f", mediaEficienciaZ2Longo))
-                    .append(") para analisar a proximidade do atleta com o gatilho de promoção do Nível ").append(nivelCenario1)
-                    .append("\n       - Explique fisiologicamente ao atleta o seu estado atual dentro deste nível, confrontando seu Efficiency Index com o 'valor_estavel' exigido no JSON do MongoDB para este volume específico, reforçando que a progressão de distância é estritamente sequencial.\n");
-        } else {
-            sb.append("       - O próximo treino é TERÇA-FEIRA (RODAGEM CURTA). Você deve obrigatoriamente prescrever o NÍVEL ").append(nivelCenario1).append(".\n");
-            sb.append("       - IMPORTANTE: As terças-feiras são âncoras de recuperação e controle de carga semanal. Por isso, o ideal é manter o treino no Nível 1 (7 a 10 km) para evitar fadiga crônica residual.\n");
-            sb.append("       - Use a média específica das terças (")
-                    .append(String.format("%.3f", mediaEficienciaZ2Curto))
-                    .append(") para validar como a eficiência está mantida de forma consistente e estável acima da meta do MongoDB.\n");
-        }
-
-        sb.append("     * REGRA DE NÍVEL E VOLUME (CONSULTE O MONGO):\n");
-        sb.append("       1. Vá até o JSON do 'CENÁRIO 1' no MongoDB, localize o NÍVEL ").append(nivelCenario1).append(".\n");
-        sb.append("       2. Extraia e prescreva exatamente o 'volume_km', 'tempo_min_minutos' e 'tempo_max_minutos' definidos para o Nível ").append(nivelCenario1).append(" no JSON.\n\n");
-
-        sb.append("     * DIFERENCIAÇÃO DO TOM DE PRESCRIÇÃO E ANÁLISE:\n");
-        sb.append("       - SE FOR TERÇA-FEIRA: Trate o treino como uma 'Rodagem de Desenvolvimento/Manutenção'. Foque em consistência de ritmo e controle de intensidade.\n");
-        sb.append("       - SE FOR SÁBADO: Trate o treino como o seu 'Longão do Microciclo' (foco em endurance). Adapte a abordagem psicológica para a sustentação do esforço prolongado e controle de fadiga (Pace Drift).\n");
-        sb.append("       - COMPARE AS DUAS MÉDIAS: Explique fisiologicamente ao atleta por que a eficiência média dele de terça-feira (")
-                .append(String.format("%.3f", mediaEficienciaZ2Curto))
-                .append(") tende a ser mais alta do que a eficiência do longão de sábado (")
-                .append(String.format("%.3f", mediaEficienciaZ2Longo))
-                .append("), relacionando diretamente isso ao maior tempo total sob esforço e à fadiga acumulada gerada pela depleção gradual do glicogênio nos treinos longos.\n\n");
-
-        sb.append("--- FORMATO DE SAÍDA OBRIGATÓRIO (NÃO USE MARKDOWN) ---\n");
         sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
         sb.append(dataFormatada).append("\n");
-        sb.append("📌 Cenário Detectado: [Título Exato do Cenário do MongoDB]\n\n");
-        sb.append("⚡ Intensidade do Estímulo: [Mapear Intensidade baseada na Zona Predominante] | Estabilidade Fisiológica: ").append(String.format("%.1f", metrics.stdDev())).append(" bpm (Desvio Padrão)\n\n");
-        sb.append("📊 Métricas: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
+        sb.append("📌 CENÁRIO: [Título Exato do Cenário do MongoDB]\n\n");
+        sb.append("⚡ INTENSIDADE: [Mapear Intensidade baseada na Zona Predominante] | Estabilidade Fisiológica: ").append(String.format("%.1f", metrics.stdDev())).append(" bpm (Desvio Padrão)\n\n");
+        sb.append("📊 MÉTRICAS: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
 
-        sb.append("📊 Distribuição de Esforço por Zona Cardíaca:\n");
-
+        sb.append("📊 ESFORÇO POR ZONA CARDÍACA:\n");
         java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
         java.util.Map<Integer, Integer> maxBpms = new java.util.HashMap<>();
         for (int bpm = hrRest; bpm <= hrMax; bpm++) {
@@ -571,11 +528,12 @@ public class InsightService {
         }
         sb.append("\n\n");
 
-        sb.append("--- HISTÓRICO DE PERFORMANCE SEGMENTADO (ÚLTIMOS 5 RESULTADOS) ---\n");
-        sb.append("Use estes dados reais do MySQL para avaliar a proximidade do atleta com o gatilho de promoção:\n");
-        sb.append(historicosUnificados).append("\n");
+        sb.append("📈 MÉDIAS DE EFICIÊNCIA ACUMULADAS (5 treinos):\n");
+        sb.append("• Rodagem Curta (Terça): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" | Nível ").append(nivelCenario1).append("\n");
+        sb.append("• Tiros / VO2máx (Quinta): ").append(String.format("%.3f", mediaEficienciaTiros)).append(" | Nível ").append(nivelCenario2).append("\n");
+        sb.append("• Longão (Sábado): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" | Nível ").append(nivelCenario1).append("\n\n");
 
-        sb.append("📊 Histórico Médio (Últimos 10 treinos):\n");
+        sb.append("📊 HISTÓRICO MÉDIO (10 treinos):\n");
         sb.append("- VO2 Máx Médio: ").append(String.format("%.1f", histVo2Medio)).append(" ml/kg/min\n");
         sb.append("- FC Máxima Média: ").append(String.format("%.0f", histFcMaxMedia)).append(" bpm\n");
         sb.append("- FC Média Geral: ").append(String.format("%.0f", histFcMediaGeral)).append(" bpm\n");
@@ -583,40 +541,67 @@ public class InsightService {
         sb.append("- Eficiência Média: ").append(String.format("%.3f", histEfficiencyIndex)).append(" (m/bpm*min)\n\n");
 
         if (prescricaoAnterior != null) {
-            sb.append("📋 Referência (Treino Anterior Prescrito):\n");
+            sb.append("📋 PLANO DO TREINO:\n");
             sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
             sb.append("- Duração/Volume: ").append(prescricaoAnterior.getDuration()).append("\n");
             sb.append("- Intensidade Alvo: ").append(prescricaoAnterior.getIntensity()).append("\n");
             sb.append("- Foco Técnico: ").append(prescricaoAnterior.getFocus()).append("\n\n");
         }
-        sb.append("1.0 - 📋 STATUS DO TREINO (CUMPRIMENTO DO PLANO):\n");
-        sb.append("REGRA DE STATUS: Analise se o atleta cumpriu o volume (tempo/distância) e a intensidade (zona de FC) planejados no treino anterior.\n");
-        sb.append("Comece a seção obrigatoriamente imprimindo uma destas três classificações em maiúsculas:\n");
-        sb.append("- [STATUS: CUMPRIDO] (Se cumpriu volume e intensidade dentro de uma margem de 10%)\n");
-        sb.append("- [STATUS: CUMPRIDO PARCIALMENTE] (Se errou o volume por mais de 10% mas manteve a intensidade correta, ou vice-versa)\n");
-        sb.append("- [STATUS: NÃO CUMPRIDO] (Se errou severamente tanto a intensidade quanto o volume)\n");
-        sb.append("[Após o status, escreva em texto corrido a justificativa técnica fisiológica do cumprimento ou desvio do plano]\n\n");
+
+        String dataTreinoFormatada = date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        sb.append("1.0 - 📋 CUMPRIMENTO DO PLANO PARA O TREINO DE ").append(dataTreinoFormatada).append(":\n");
+        sb.append("STATUS: [CUMPRIDO | CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO]\n");
+        sb.append("[Escreva em texto corrido a justificativa técnica do cumprimento ou desvio do plano baseando-se no plano prescrito]\n\n");
 
         sb.append("2.0 - 👨‍⚕️ DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n");
-        sb.append("[Determine e descreva a faixa de eficiência baseada no Efficiency Index (Ex: Eficiente, Excelente). Insira o texto técnico fisiológico embasando os processos celulares com base nos 'diagnosticos_clinicos' do cenário ativo no MongoDB, referenciando formalmente as pesquisas do arquivo]\n\n");
+        sb.append("[FOCO EXCLUSIVO: BIOQUÍMICA E CÉLULA]\n");
+        sb.append("• Classifique o Efficiency Index (ex: Excelente, Eficiente).\n");
+        sb.append("• Desenvolva a análise metabólica focando EXCLUSIVAMENTE nas vias energéticas (FatMax, oxidação lipídica, biogênese mitocondrial PGC-1alpha, preservação de glicogênio e depuração de lactato).\n");
+        sb.append("• Cite formalmente os autores do MongoDB (Casanova et al., San-Millán & Brooks, Seiler).\n");
+        sb.append("• É ESTRITAMENTE PROIBIDO citar desvio padrão em bpm, janelas instáveis ou oscilação de ritmo nesta seção.\n\n");
 
         sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n");
-        sb.append("[Analise a economia de corrida e o comportamento de fadiga (Pace Drift) do treino atual]\n\n");
+        sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA E PACE DRIFT]\n");
+        sb.append("• Desenvolva a análise focando EXCLUSIVAMENTE na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
+        sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(janelasInstaveis).append(" janelas móveis instáveis identificadas pelo sistema.\n");
+        sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
+        sb.append("• É ESTRITAMENTE PROIBIDO repetir explicações sobre PGC-1alpha, mitocôndrias ou autores já citados na Seção 2.0.\n\n");
 
         sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n");
-        sb.append("--- CONTEXTO HISTÓRICO DE LEITURA (ÚLTIMAS ATIVIDADES GLOBAIS) ---\n");
-        sb.append(historicoPerformanceGlobal).append("\n");
-        sb.append("--- INSTRUÇÃO DE ANÁLISE PARA A SEÇÃO 4.0 ---\n");
-        sb.append("• Utilize o histórico cronológico de atividades e diagnósticos acima APENAS como base de conhecimento interna para avaliar a evolução ou involução do atleta.\n");
-        sb.append("• NÃO imprima a lista de treinos acima na resposta final do Telegram.\n");
-        sb.append("• Escreva em texto corrido um parecer técnico discricionário comparando o rendimento de HOJE com o histórico recente (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
-        sb.append("• Encerre com uma mensagem encorajadora e alinhada à preparação para a Meia Maratona de 01/11/2026.\n\n");
+        sb.append("• Escreva em texto corrido um parecer técnico e motivacional comparando o rendimento de HOJE com o histórico recente lido na orientação inicial (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
+        sb.append("• NÃO IMPRIMA listas de treinos anteriores nesta seção. Escreva apenas a análise textual.\n\n");
+
+        sb.append("COMPARAÇÃO DE EFICIÊNCIA SEMANAL (TERÇA X QUINTA X SÁBADO):\n");
+        sb.append("[Escreva um parágrafo fisiológico detalhado comparando as eficiências das Rodagens de Terça (")
+                .append(String.format("%.3f", mediaEficienciaZ2Curto))
+                .append("), dos Tiros de Quinta (")
+                .append(String.format("%.3f", mediaEficienciaTiros))
+                .append(") e dos Longões de Sábado (")
+                .append(String.format("%.3f", mediaEficienciaZ2Longo))
+                .append("). Explique como a intensidade dos tiros (Quinta) e o baixo volume contínuo (Terça) entregam eficiências mais altas em comparação ao custo cardiovascular acumulado pela depleção de glicogênio e desgaste nos longões (Sábado), reforçando o modelo de treinamento polarizado de Seiler]\n\n");
+
+        sb.append("• Encerre com uma mensagem encorajadora e crie conexão amigável com o atleta rumo à Meia Maratona de 31/10/2026.\n\n");
 
         sb.append("5.0 - 🍽️ NUTRIÇÃO / DESCANSO 💤\n");
-        sb.append("[Prescreva a estratégia detalhada de alimentação pré e pós treino com as opções sugeridas no MongoDB (incluindo as fontes alimentares específicas, o alerta de antioxidantes sintéticos na NOX2 se for tiros, e os tempos de repouso muscular de 4h e de transição/intervalos entre estímulos)]\n\n");
+        sb.append("[Prescreva a estratégia detalhada de alimentação pré/pós treino e janelas de repouso conforme as diretrizes do MongoDB para o tipo de treino realizado HOJE. Se foi Z2 use 'light_moderated_days', se foi Tiros use 'high_intensity_days']\n\n");
+
+        sb.append("6.0 - 📅 PRESCRIÇÃO STRAFIT PREDICT:\n\n");
+        sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData.toUpperCase()).append("\n\n");
+        sb.append("TIPO DE ESTÍMULO: [Nome do Estímulo Prescrito do MongoDB]\n\n");
+        sb.append("NÍVEL ATUAL DE PROGRESSÃO: NÍVEL ").append(proximoEhSabado ? nivelCenario1 : (proximoTreinoData.toUpperCase().contains("QUINTA") || proximoTreinoData.toUpperCase().contains("THURSDAY") ? nivelCenario2 : nivelCenario1)).append(" ([Nome da Variação Selecionada no JSON, ex: N1-V4])\n\n");
+        sb.append("OBJETIVO: [Objetivo técnico do treino prescrito]\n\n");
+        sb.append("ESTRUTURA DO TREINO ([Cenário X], Nível [Y] - Variação [Vx]):\n");
+        sb.append("VOLUME: [Volume em km definido na variação no JSON]\n");
+        sb.append("DURAÇÃO ALVO: Entre [X] e [Y] minutos\n");
+        sb.append("INTENSIDADE: [Faixa de Zonas de FC e BPM do JSON]\n");
+        sb.append("MÉTODO: [Descreva a execução contínua ou ritos de tiros/pausas]\n\n");
+        sb.append("JUSTIFICATIVA TÉCNICA DA VARIAÇÃO ([Código da Variação]):\n");
+        sb.append("[Explique o motivo exato da escolha da Variação com base no Efficiency Index Médio do atleta no dia correspondente]\n\n");
+
+
 
         sb.append("--- INSTRUÇÃO TÉCNICA DO SISTEMA ---\n");
-        sb.append("Ao final do relatório, adicione OBRIGATORIAMENTE o bloco XML com os dados da prescrição criada:\n");
+        sb.append("Ao final do relatório, adicione OBRIGATORIAMENTE o bloco XML abaixo UMA ÚNICA VEZ:\n");
         sb.append("<prescription_data>\n");
         sb.append("  <scheduled_date>").append(parseNextWorkoutDate(proximoTreinoData).format(DateTimeFormatter.ISO_LOCAL_DATE)).append("</scheduled_date>\n");
         sb.append("  <type>[Tipo do treino]</type>\n");
