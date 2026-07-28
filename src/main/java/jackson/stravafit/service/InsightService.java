@@ -561,25 +561,21 @@ public class InsightService {
         sb.append("• É ESTRITAMENTE PROIBIDO citar desvio padrão em bpm, janelas instáveis ou oscilação de ritmo nesta seção.\n\n");
 
         sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n");
-        sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA E PACE DRIFT]\n");
-        sb.append("• Desenvolva a análise focando EXCLUSIVAMENTE na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
+        sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA, PACE DRIFT E EFICIÊNCIA]\n");
+        sb.append("• Desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(janelasInstaveis).append(" janelas móveis instáveis identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
-        sb.append("• É ESTRITAMENTE PROIBIDO repetir explicações sobre PGC-1alpha, mitocôndrias ou autores já citados na Seção 2.0.\n\n");
+        sb.append("• CORRELAÇÃO POSITIVA (VO2MÁX x EFIC): Explique como o VO2máx estimado de hoje (")
+                .append(String.format("%.1f", metrics.vo2MaxEstimado()))
+                .append(") se correlaciona positivamente com o Efficiency Index (")
+                .append(String.format("%.3f", metrics.efficiencyIndex()))
+                .append("). Demonstre como a estabilidade do ritmo e o baixo custo cardiovascular por batimento hoje refletem ganhos reais em economia de corrida em relação à sua média histórica.\n");
 
+        sb.append("• É ESTRITAMENTE PROIBIDO repetir explicações sobre PGC-1alpha, mitocôndrias ou autores já citados na Seção 2.0.\n\n");
         sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n");
         sb.append("• Escreva em texto corrido um parecer técnico e motivacional comparando o rendimento de HOJE com o histórico recente lido na orientação inicial (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
-        sb.append("• NÃO IMPRIMA listas de treinos anteriores nesta seção. Escreva apenas a análise textual.\n\n");
-
-        sb.append("COMPARAÇÃO DE EFICIÊNCIA SEMANAL (TERÇA X QUINTA X SÁBADO):\n");
-        sb.append("[Escreva um parágrafo fisiológico detalhado comparando as eficiências das Rodagens de Terça (")
-                .append(String.format("%.3f", mediaEficienciaZ2Curto))
-                .append("), dos Tiros de Quinta (")
-                .append(String.format("%.3f", mediaEficienciaTiros))
-                .append(") e dos Longões de Sábado (")
-                .append(String.format("%.3f", mediaEficienciaZ2Longo))
-                .append("). Explique como a intensidade dos tiros (Quinta) e o baixo volume contínuo (Terça) entregam eficiências mais altas em comparação ao custo cardiovascular acumulado pela depleção de glicogênio e desgaste nos longões (Sábado), reforçando o modelo de treinamento polarizado de Seiler]\n\n");
-
+        sb.append("• É ESTRITAMENTE PROIBIDO escrever teorias longas sobre depleção de glicogênio ou comparações genéricas de dias da semana (foco na relação VO2 x Eficiência de hoje vs histórico).\n");
+        sb.append("• NÃO IMPRIMA listas de treinos anteriores nesta seção.\n\n");
         sb.append("• Encerre com uma mensagem encorajadora e crie conexão amigável com o atleta rumo à Meia Maratona de 31/10/2026.\n\n");
 
         sb.append("5.0 - 🍽️ NUTRIÇÃO / DESCANSO 💤\n");
