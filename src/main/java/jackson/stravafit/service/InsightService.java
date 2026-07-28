@@ -446,8 +446,13 @@ public class InsightService {
         // =================================================================
         // ZONA 1: INSTRUÇÕES E DADOS PRIVADOS DO SISTEMA (A IA LÊ, MAS NÃO IMPRIME)
         // =================================================================
-        sb.append("VOCÊ É UM ANALISTA DE PERFORMANCE DE ELITE E FISIOLOGISTA DE CORRIDA DO PROJETO STRAVAFIT.\n");
-        sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO SEGUINDO A MATRIZ DE CONHECIMENTO, PRESCREVER A RECUPERAÇÃO TÉCNICA E GERAR A PRÓXIMA PRESCRIÇÃO.\n\n");
+        sb.append("VOCÊ É O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
+        sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO, PRESCREVER A RECUPERAÇÃO E GERAR O PRÓXIMO TREINO.\n\n");
+
+        sb.append("🚨 REGRA MANDATÓRIA DE LINGUAGEM E TOM DE VOZ:\n");
+        sb.append("- FALE DIRETAMENTE COM O ATLETA (").append(nomeAtleta.toUpperCase()).append(") EM PRIMEIRA PESSOA DO SINGULAR ('Eu analisei', 'Eu observei', 'Identifiquei').\n");
+        sb.append("- TRATE O ATLETA DIRETAMENTE POR 'VOCÊ' OU PELO NOME ('").append(nomeAtleta).append("').\n");
+        sb.append("- É ESTRITAMENTE PROIBIDO FALAR EM TERCEIRA PESSOA (NÃO USE 'O atleta cumpriu', 'O corredor executou', 'fulano realizou'). Use sempre 'Você cumpriu', 'Você executou'.\n\n");
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
 

@@ -1,0 +1,146 @@
+================================================================================
+          STRAVAFIT IA - PLANO DIÁRIO PASSO A PASSO (SEQUENCIAL)
+================================================================================
+
+[DIRETRIZES DE ARQUITETURA & ECONOMIA DE CUSTOS]
+• Cloud Run: Mínimo de instâncias = 0 (Inativo = R$ 0,00 de cobrança).
+• Java 21 + Spring Boot 3: Uso de Virtual Threads para altíssima concorrência com pouca RAM.
+• MySQL Otimizado: Uso de DTOs e Projections para evitar buscar dados desnecessários.
+• MongoDB Cacheado: A matriz fisiológica lida no MongoDB é mantida na memória do Java.
+
+================================================================================
+ETAPA 1: BACKEND & BANCO DE DADOS (DIAS 01 A 03)
+================================================================================
+
+--------------------------------------------------------------------------------
+DIA 01: BANCO DE DADOS & ENTIDADES DO USUÁRIO (MYSQL)
+--------------------------------------------------------------------------------
+OBJETIVO: Criar as tabelas no banco MySQL e os mapeamentos no Java.
+
+PASSO 1: Criar o script Flyway de migration (V2__create_tables.sql):
+  - Criar tabela 'users': id, google_id, strava_athlete_id, name, email,
+    gender (MALE/FEMALE), birth_date, hr_max, hr_resting, weekly_frequency,
+    training_days (ex: "TUESDAY,THURSDAY,SATURDAY"), target_objective.
+  - Criar tabela 'user_events': id, user_id (FK), event_name, event_date,
+    target_distance_km, is_main_event.
+  - Criar tabela 'activity_analyses': id, user_id (FK), strava_activity_id,
+    analysis_text (LONGTEXT), created_at.
+
+PASSO 2: Criar as Entidades JPA no Spring Boot:
+  - UserEntity.java (incluindo weeklyFrequency e Set<DayOfWeek> trainingDays)
+  - UserEventEntity.java
+  - ActivityAnalysisEntity.java
+  - Enum Gender.java (MALE, FEMALE)
+
+PASSO 3: Criar os Repositories do Spring Data JPA:
+  - UserRepository, UserEventRepository, ActivityAnalysisRepository.
+
+ENTREGA DO DIA: Aplicação rodando e gerando as tabelas no MySQL.
+
+--------------------------------------------------------------------------------
+DIA 02: MATRIZ FISIOLÓGICA FEMININA NO MONGODB & CACHE
+--------------------------------------------------------------------------------
+OBJETIVO: Permitir que o sistema leia regras fisiológicas femininas sem custo extra.
+
+PASSO 1: Criar o arquivo 'knowledge_matrix_female.json' no MongoDB com as regras
+         e limiares específicos para atletas do sexo feminino.
+
+PASSO 2: Criar/Atualizar o Service de Conhecimento Fisiológico no Java:
+  - Criar o método getMatrixByUserGender(Gender gender).
+  - Adicionar anotação @Cacheable ou HashMap em memória para carregar as matrizes
+    na inicialização (evita chamadas repetidas ao MongoDB).
+
+ENTREGA DO DIA: O Java selecionando o JSON masculino ou feminino automaticamente.
+
+--------------------------------------------------------------------------------
+DIA 03: REFATORAÇÃO DO PROMPT MANAGER (DADOS DINÂMICOS DA IA)
+--------------------------------------------------------------------------------
+OBJETIVO: Injetar usuário, rotina de treinos, prova alvo e tom de voz no prompt da IA.
+
+PASSO 1: Atualizar o 'InsightService.java' e o 'PromptBuilder':
+  - Passar a receber o UserEntity e o UserEventEntity do banco de dados.
+  - Substituir textos estáticos pela data e nome da prova cadastrada no banco.
+  - Calcular e injetar automaticamente a data do próximo treino com base nos
+    dias de treino cadastrados do atleta (trainingDays).
+
+PASSO 2: Consolidar as regras imperativas no System Prompt:
+  - Forçar a IA a responder sempre em PRIMEIRA PESSOA ("Eu analisei", "Eu observei").
+  - Tratar o usuário diretamente por "Você".
+
+ENTREGA DO DIA: Análises da IA 100% personalizadas por usuário, gênero, rotina e prova.
+
+================================================================================
+ETAPA 2: REGRAS DE NEGÓCIO & ENDPOINTS REST (DIAS 04 E 05)
+================================================================================
+
+--------------------------------------------------------------------------------
+DIA 04: AUTENTICAÇÃO GOOGLE & ENDPOINTS DE CADASTRO
+--------------------------------------------------------------------------------
+OBJETIVO: Criar os caminhos (Endpoints) para o HTML enviar os dados ao Java.
+
+PASSO 1: Adicionar dependência do Google Token Verifier no pom.xml.
+
+PASSO 2: Criar o AuthController.java:
+  - POST /api/v1/auth/google: Recebe o ID Token do Google vindo do Frontend,
+    valida a autenticidade e verifica se o e-mail já existe no MySQL.
+
+PASSO 3: Criar o UserController.java:
+  - POST /api/v1/users/onboarding: Recebe e grava no MySQL os dados iniciais do
+    perfil (Gênero, FC Máx, FC Repouso, Data de Nascimento, Prova Alvo,
+    Frequência Semanal e Dias de Treino Escolhidos).
+
+ENTREGA DO DIA: Endpoints do backend prontos para receber cadastros completos.
+
+--------------------------------------------------------------------------------
+DIA 05: VINCULAÇÃO DO WEBHOOK DO STRAVA AO USUÁRIO
+--------------------------------------------------------------------------------
+OBJETIVO: Fazer o treino do Strava ser salvo para o usuário certo no banco.
+
+PASSO 1: Atualizar o StravaWebhookService.java:
+  - Ao receber a notificação do Strava (owner_id), buscar no MySQL:
+    UserRepository.findByStravaAthleteId(ownerId).
+  - Executar a análise com o gênero e métricas do usuário encontrado.
+  - Salvar o resultado final na tabela 'activity_analyses' associado ao ID do usuário.
+
+PASSO 2: Criar Endpoint de consulta do relatório:
+  - GET /api/v1/analyses/latest: Retorna o último treino analisado do usuário logado.
+
+ENTREGA DO DIA: Fluxo de gravação e busca do treino 100% automatizado no backend.
+
+================================================================================
+ETAPA 3: FRONTEND HTML/JS & DEPLOY CLOUD (DIAS 06 E 07)
+================================================================================
+
+--------------------------------------------------------------------------------
+DIA 06: FRONTEND HTML5 / TAILWIND CSS & JAVASCRIPT INTEGRADO
+--------------------------------------------------------------------------------
+OBJETIVO: Criar a tela do site e conectar aos Endpoints do Java.
+
+PASSO 1: Criar a estrutura Frontend (index.html, app.js, style.css):
+  - Utilizar Tailwind CSS para layout moderno e Dark Mode responsivo.
+  - Adicionar o botão oficial "Login com Google" (Google Identity Services API).
+  - Formulário de Onboarding com seleção dos dias da semana (caixas de seleção).
+
+PASSO 2: Escrever as funções em JavaScript (Conexão com o Backend):
+  - Função 1: Enviar o Token do Google para POST /api/v1/auth/google.
+  - Função 2: Exibir o formulário de Onboarding caso seja o primeiro acesso.
+  - Função 3: Chamar GET /api/v1/analyses/latest e renderizar o relatório e a
+    prescrição do próximo treino em cards bonitos na tela.
+
+ENTREGA DO DIA: Aplicação Web completa, onde o usuário loga e visualiza tudo na tela.
+
+--------------------------------------------------------------------------------
+DIA 07: DEPLOY AUTOMATIZADO NO GOOGLE CLOUD RUN (CUSTO ZERO)
+--------------------------------------------------------------------------------
+OBJETIVO: Subir a aplicação na nuvem mantendo custo zero no Free Tier.
+
+PASSO 1: Criar o Dockerfile otimizado para Java 21 (Multi-stage build).
+
+PASSO 2: Executar o comando de Deploy no Google Cloud Run:
+  - Configurar min-instances=0 (Garante custo R$ 0,00 se ninguém estiver usando).
+  - Configurar max-instances=2 e concurrency=80.
+
+PASSO 3: Mapear Variáveis de Ambiente de produção (Chaves do Gemini, Strava e MySQL).
+
+ENTREGA DO DIA: Plataforma online, funcional no computador e no celular!
+================================================================================
