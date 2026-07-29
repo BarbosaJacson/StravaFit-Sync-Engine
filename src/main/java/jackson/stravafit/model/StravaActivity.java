@@ -42,6 +42,9 @@ public class StravaActivity {
     @JsonProperty("max_heartrate")
     private Double maxHeartRate;
 
+    @JsonProperty("athlete")
+    private StravaAthlete athlete;
+
     private Double calories;
 
     // Construtor padrão
@@ -49,7 +52,7 @@ public class StravaActivity {
     }
 
     // Construtor com todos os argumentos
-    public StravaActivity(Long id, String name, Double distance, Integer movingTime, Integer elapsedTime, Double totalElevationGain, String sportType, String startDateLocal, Double averageSpeed, Double maxSpeed, Boolean hasHeartRate, Double averageHeartRate, Double maxHeartRate, Double calories) {
+    public StravaActivity(Long id, String name, Double distance, Integer movingTime, Integer elapsedTime, Double totalElevationGain, String sportType, String startDateLocal, Double averageSpeed, Double maxSpeed, Boolean hasHeartRate, Double averageHeartRate, Double maxHeartRate, StravaAthlete athlete, Double calories) {
         this.id = id;
         this.name = name;
         this.distance = distance;
@@ -63,6 +66,7 @@ public class StravaActivity {
         this.hasHeartRate = hasHeartRate;
         this.averageHeartRate = averageHeartRate;
         this.maxHeartRate = maxHeartRate;
+        this.athlete = athlete;
         this.calories = calories;
     }
 
@@ -80,6 +84,7 @@ public class StravaActivity {
     public Boolean getHasHeartRate() { return hasHeartRate; }
     public Double getAverageHeartRate() { return averageHeartRate; }
     public Double getMaxHeartRate() { return maxHeartRate; }
+    public StravaAthlete getAthlete() { return athlete; }
     public Double getCalories() { return calories; }
 
     // Setters
@@ -96,6 +101,7 @@ public class StravaActivity {
     public void setHasHeartRate(Boolean hasHeartRate) { this.hasHeartRate = hasHeartRate; }
     public void setAverageHeartRate(Double averageHeartRate) { this.averageHeartRate = averageHeartRate; }
     public void setMaxHeartRate(Double maxHeartRate) { this.maxHeartRate = maxHeartRate; }
+    public void setAthlete(StravaAthlete athlete) { this.athlete = athlete; }
     public void setCalories(Double calories) { this.calories = calories; }
 
     public double distanceKm() {
@@ -203,6 +209,17 @@ public class StravaActivity {
         public void setLastActivityDate(String lastActivityDate) { this.lastActivityDate = lastActivityDate; }
         public void setSummarizedStatus(String summarizedStatus) { this.summarizedStatus = summarizedStatus; }
         public void setFitnessScore(Double fitnessScore) { this.fitnessScore = fitnessScore; }
+    }
+    // DTO interno para mapear o id do atleta no payload do Strava
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class StravaAthlete {
+        private Long id;
+
+        public StravaAthlete() {}
+        public StravaAthlete(Long id) { this.id = id; }
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
     }
 
     @Override

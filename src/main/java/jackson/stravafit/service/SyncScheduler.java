@@ -3,7 +3,9 @@ package jackson.stravafit.service;
 import jackson.stravafit.client.TelegramClient;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.TokenResponse;
+import jackson.stravafit.model.UserEntity;
 import jackson.stravafit.repository.ActivityRepository;
+import jackson.stravafit.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,7 +28,9 @@ public class SyncScheduler {
     private final InsightService insightService;
     private final TelegramClient telegramClient;
     private final ActivityRepository activityRepository;
+    private final UserRepository userRepository;
     private final ConfigurableApplicationContext context;
+
     @Value("${strava.auto-start:false}")
     private boolean autoStart;
 
@@ -39,31 +43,29 @@ public class SyncScheduler {
     @EventListener(ApplicationReadyEvent.class)
     public void autoExecutarNoStartup() {
         if (autoStart) {
-        log.info("[STARTUP] Aplicação iniciada com sucesso. Disparando motor automaticamente...");
-        executarSincronizacao();
-    } else {
+            log.info("[STARTUP] Aplicação iniciada com sucesso. Disparando motor automaticamente...");
+            executarSincronizacao();
+        } else {
             log.info("[STARTUP] Modo Webhook ativo. Aguardando requisições externas na porta 8080...");
         }
     }
-    public boolean executarSincronizacao(){
+
+    public boolean executarSincronizacao() {
         log.info("\n=== [MOTOR] Sincronização sob demanda iniciada ===");
         try {
             ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(this.accessToken, 1);
             if (response.activities().isEmpty()) {
                 log.warn("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
-                enviarLembreteUltimoInsight(); // Reenvia o último como fallback de teste
+                enviarLembreteUltimoInsight();
                 encerrarAplicacaoGraciosamente();
                 return false;
             }
 
             StravaActivity activity = response.activities().get(0);
 
-            // Se o treino do dia já foi analisado (caso do seu teste manual)
             if (activityRepository.existsById(activity.getId())) {
                 log.info("-> Treino do dia (" + activity.getName() + ") já analisado. Acionando fallback de reenvio...");
-
-                enviarLembreteUltimoInsight(); // 🔥 Executa o reenvio exigido para o teste
-
+                enviarLembreteUltimoInsight();
                 encerrarAplicacaoGraciosamente();
                 return false;
             }
@@ -91,11 +93,22 @@ public class SyncScheduler {
 
     private void processarEEnviar(String token, StravaActivity activity) {
         try {
+            // 🎯 Busca as métricas do atleta no MySQL (ID 1)
+            UserEntity user = userRepository.findById(1L)
+                    .orElseThrow(() -> new IllegalStateException("Atleta principal não cadastrado no MySQL."));
+
+            int hrMax = user.getHrMax();
+            int hrResting = user.getHrResting();
+
             List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.getId());
-            List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, null);
+
+            // 🎯 Repassa hrMax e hrResting para a agregação por minuto
+            List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, null, hrMax, hrResting);
 
             String insight = insightService.getActivityInsight(activity, minuteAnalysis);
-            String zonaDominante = activityService.calculateDominantZoneSummary(activityService.getHeartRateStream(streams));
+
+            // 🎯 Repassa hrMax e hrResting para o resumo da zona dominante
+            String zonaDominante = activityService.calculateDominantZoneSummary(activityService.getHeartRateStream(streams), hrMax, hrResting);
 
             if (isValidInsight(insight)) {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
@@ -106,13 +119,10 @@ public class SyncScheduler {
                 activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
             }
         } catch (Exception e) {
-            log.error("Erro ao processar e enviar atividade {}: {}", activity.getId(), e.getMessage());
+            log.error("Erro ao processar e enviar atividade {}: {}", activity.getId(), e.getMessage(), e);
         }
     }
 
-    /**
-     * Busca a última atividade registrada no banco e reenvia o insight existente ao Telegram.
-     */
     private void enviarLembreteUltimoInsight() {
         activityRepository.findTopByOrderByStartDateDesc().ifPresentOrElse(activity -> {
             if (isValidInsight(activity.getGeminiInsight())) {
@@ -125,9 +135,6 @@ public class SyncScheduler {
         }, () -> log.warn("   [FALLBACK] Nenhum treino encontrado no banco de dados para reenvio."));
     }
 
-    /**
-     * Finaliza de forma assíncrona o container para garantir entrega dos buffers de rede.
-     */
     private void encerrarAplicacaoGraciosamente() {
         new Thread(() -> {
             try {

@@ -1,15 +1,12 @@
 package jackson.stravafit.service;
 
 import jackson.stravafit.client.GeminiClient;
-import jackson.stravafit.model.ActivityEntity;
-import jackson.stravafit.model.ActivitySummaryEntity;
-import jackson.stravafit.model.StravaActivity;
-import jackson.stravafit.model.WorkoutPrescriptionEntity;
+import jackson.stravafit.model.*;
 import jackson.stravafit.repository.ActivityRepository;
 import jackson.stravafit.repository.ActivitySummaryRepository;
+import jackson.stravafit.repository.UserRepository;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -42,9 +39,9 @@ public class InsightService {
     private final WorkoutPrescriptionRepository workoutPrescriptionRepository;
     private final ActivityService activityService;
     private final ActivitySummaryRepository activitySummaryRepository;
+    private final UserRepository userRepository;
     private final KnowledgeService knowledgeService;
     private final InsightService self;
-    private final String nomeAtleta;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     private static final DateTimeFormatter BRAZIL_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
@@ -54,25 +51,35 @@ public class InsightService {
                           ActivityRepository activityRepository,
                           WorkoutPrescriptionRepository workoutPrescriptionRepository,
                           ActivitySummaryRepository activitySummaryRepository,
+                          UserRepository userRepository,
                           ActivityService activityService,
                           @Lazy InsightService self,
-                          KnowledgeService knowledgeService,
-                          @Value("${atleta.nome:Jacson}") String nomeAtleta) {
+                          KnowledgeService knowledgeService) {
         this.geminiClient = geminiClient;
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
         this.activitySummaryRepository = activitySummaryRepository;
+        this.userRepository = userRepository;
         this.activityService = activityService;
         this.self = self;
         this.knowledgeService = knowledgeService;
-        this.nomeAtleta = nomeAtleta;
     }
 
     public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {}
 
     @Transactional
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
+
+        // 🎯 1. Tenta identificar o atleta pelo Strava (Com fallback seguro para o usuário 1L)
+        Long athleteIdStrava = (activity != null && activity.getAthlete() != null) ? activity.getAthlete().getId() : null;
+
+        UserEntity user = Optional.ofNullable(athleteIdStrava)
+                .flatMap(userRepository::findByStravaAthleteId)
+                .orElseGet(() -> userRepository.findById(1L)
+                        .orElseThrow(() -> new IllegalStateException("Atleta principal (ID 1) não cadastrado no MySQL.")));
+
         return generateInsight(
+                user,
                 activity.getId(),
                 activity.getName(),
                 activity.getDistance() != null ? activity.getDistance() / 1000.0 : 0.0,
@@ -81,11 +88,13 @@ public class InsightService {
                 analysis);
     }
 
-    private String generateInsight(Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
-        // 1. Primeiro calculamos as métricas essenciais e as datas
+    private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
+
+        // 1. Primeiro calculamos as métricas essenciais e as datas baseadas nas preferências do atleta
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
-        String proximoTreinoData = calcularProximaDataTreino(activityDate);
-        SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed);
+        Set<DayOfWeek> diasConfigurados = parseTrainingDays(user.getTrainingDays());
+        String proximoTreinoData = calcularProximaDataTreino(activityDate, diasConfigurados);
+        SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed, user);
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior = workoutPrescriptionRepository.findTopByScheduledDateOrderByCreatedAtDesc(activityDate.toLocalDate());
 
         // 2. Classificamos o estímulo para saber qual cenário a sessão atual pertence
@@ -154,13 +163,7 @@ public class InsightService {
         int cenarioDetectado = ehTiro ? 2 : 1;
         int nivelDetectado = (cenarioDetectado == 2) ? nivelCenario2 : nivelCenario1;
 
-        // 10. Formatamos os históricos em texto para o prompt
-        String historicoTirosPrompt = formatarHistoricoParaPrompt(listaTiros, "Tiros de Quinta-Feira (Cenário 2, Nível " + nivelCenario2 + ")");
-        String historicoTercasPrompt = formatarHistoricoParaPrompt(listaTercas, "Rodagem Curta de Terça-Feira (Cenário 1, Nível 1)");
-        String historicoSabadosPrompt = formatarHistoricoParaPrompt(listaSabados, "Longão de Sábado (Cenário 1, Nível " + nivelCenario1 + ")");
-        String historicosUnificados = historicoTirosPrompt + "\n" + historicoTercasPrompt + "\n" + historicoSabadosPrompt;
-
-        // 🎯 10.1 LINHA DO TEMPO CRONOLÓGICA GLOBAL
+        // 10. LINHA DO TEMPO CRONOLÓGICA GLOBAL
         List<ActivitySummaryEntity> historicoGlobalFiltrado = new ArrayList<>();
         historicoGlobalFiltrado.addAll(listaTiros);
         historicoGlobalFiltrado.addAll(listaCenario1);
@@ -179,7 +182,6 @@ public class InsightService {
                     ef,
                     fc));
 
-            // 🎯 Injeta o resumo textual do diagnóstico anterior se existir no MySQL
             if (act.getAiAnalysisSummary() != null && !act.getAiAnalysisSummary().isBlank()) {
                 sbHistoricoGlobal.append("  [Diagnóstico Anterior]: ")
                         .append(act.getAiAnalysisSummary().replaceAll("\n", " "))
@@ -190,22 +192,21 @@ public class InsightService {
 
         String historicoPerformanceGlobal = sbHistoricoGlobal.toString();
 
-        // 11. Passamos o prompt estruturado com todas as variáveis instanciadas
-        String prompt = buildProfessionalPrompt(name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null),
-                nivelCenario1, nivelCenario2, tipoEstimuloReal, janelasInstaveis, historicosUnificados,
+        // 11. Passamos o prompt estruturado com todas as variáveis instanciadas e o 'user'
+        String prompt = buildProfessionalPrompt(user, name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null),
+                nivelCenario1, nivelCenario2, tipoEstimuloReal, janelasInstaveis,
                 mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo, historicoPerformanceGlobal);
 
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
 
         // 12. Persiste os dados técnicos calculados oficialmente no MySQL
-        self.persistirDadosTecnicos(activityId, activityDate, metrics, cleanResult, rawAiResponse, tipoEstimuloReal, cenarioDetectado, nivelDetectado);
-
+        self.persistirDadosTecnicos(activityId, user.getId(), activityDate, metrics, cleanResult, rawAiResponse, tipoEstimuloReal, cenarioDetectado, nivelDetectado);
         return sanitizeOutput(cleanResult);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void persistirDadosTecnicos(Long activityId, ZonedDateTime activityDate, SessionMetrics metrics,
+    public void persistirDadosTecnicos(Long activityId, Long userId, ZonedDateTime activityDate, SessionMetrics metrics,
                                        String cleanResult, String rawAiResponse,
                                        String tipoEstimuloReal, int cenarioDetectado, int nivelDetectado) {
         try {
@@ -226,14 +227,14 @@ public class InsightService {
             activitySummaryRepository.saveAndFlush(summary);
             log.info("[DB] Sumário de performance persistido com classificação para atividade: {}", activityId);
 
-            self.extractAndSavePrescription(activityId, rawAiResponse);
+            self.extractAndSavePrescription(activityId, userId, rawAiResponse);
         } catch (Exception e) {
             log.error("[DB] Falha ao persistir dados técnicos: {}", e.getMessage(), e);
         }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void extractAndSavePrescription(Long activityId, String rawAiResponse) {
+    public void extractAndSavePrescription(Long activityId, Long userId, String rawAiResponse) {
         try {
             String xml = extractXmlBlock(rawAiResponse);
             if (xml == null) {
@@ -259,7 +260,12 @@ public class InsightService {
             prescription.setMethod(extractTagValue(xml, "method"));
             prescription.setRawGeminiResponse(rawAiResponse);
 
-            int targetScenario = (scheduledDate.getDayOfWeek() == DayOfWeek.THURSDAY) ? 2 : 1;
+            // Busca o usuário específico dono do treino atual
+            UserEntity user = userRepository.findById(userId).orElseGet(() -> userRepository.findById(1L).orElse(new UserEntity()));
+            Set<DayOfWeek> diasDoAtleta = parseTrainingDays(user.getTrainingDays());
+
+            // Calcula dinamicamente o cenário alvo com base no dia agendado e nos dias configurados do atleta
+            int targetScenario = determinarCenarioAlvo(scheduledDate.getDayOfWeek(), diasDoAtleta);
 
             int targetLevel;
             if (targetScenario == 2) {
@@ -416,23 +422,23 @@ public class InsightService {
         return new ClassificacaoResultado("CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)", contagemJanelasInstaveis);
     }
 
-    private String buildProfessionalPrompt(String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData,
+    private String buildProfessionalPrompt(UserEntity user, String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData,
                                            WorkoutPrescriptionEntity prescricaoAnterior,
                                            int nivelCenario1,
                                            int nivelCenario2,
                                            String tipoEstimuloReal,
                                            int janelasInstaveis,
-                                           String historicosUnificados,
                                            double mediaEficienciaTiros,
                                            double mediaEficienciaZ2Curto,
                                            double mediaEficienciaZ2Longo,
                                            String historicoPerformanceGlobal) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
-        String scientificContext = knowledgeService.getScientificContext();
+        String scientificContext = knowledgeService.getScientificContext(user.getGender());
         List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
 
-        int hrMax = activityService.getAthleteConfig().getHrMax();
-        int hrRest = activityService.getAthleteConfig().getHrResting();
+        int hrMax = user.getHrMax();
+        int hrRest = user.getHrResting();
+        String nomeAtletaReal = (user.getName() != null && !user.getName().isBlank()) ? user.getName() : "Atleta";
         boolean proximoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
 
         double histVo2Medio = historico.stream().mapToDouble(a -> 15.3 * ((a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMax) / (double) hrRest)).average().orElse(0.0);
@@ -443,15 +449,12 @@ public class InsightService {
 
         StringBuilder sb = new StringBuilder();
 
-        // =================================================================
-        // ZONA 1: INSTRUÇÕES E DADOS PRIVADOS DO SISTEMA (A IA LÊ, MAS NÃO IMPRIME)
-        // =================================================================
         sb.append("VOCÊ É O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
         sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO, PRESCREVER A RECUPERAÇÃO E GERAR O PRÓXIMO TREINO.\n\n");
 
         sb.append("🚨 REGRA MANDATÓRIA DE LINGUAGEM E TOM DE VOZ:\n");
-        sb.append("- FALE DIRETAMENTE COM O ATLETA (").append(nomeAtleta.toUpperCase()).append(") EM PRIMEIRA PESSOA DO SINGULAR ('Eu analisei', 'Eu observei', 'Identifiquei').\n");
-        sb.append("- TRATE O ATLETA DIRETAMENTE POR 'VOCÊ' OU PELO NOME ('").append(nomeAtleta).append("').\n");
+        sb.append("- FALE DIRETAMENTE COM O ATLETA (").append(nomeAtletaReal.toUpperCase()).append(") EM PRIMEIRA PESSOA DO SINGULAR ('Eu analisei', 'Eu observei', 'Identifiquei').\n");
+        sb.append("- TRATE O ATLETA DIRETAMENTE POR 'VOCÊ' OU PELO NOME ('").append(nomeAtletaReal).append("').\n");
         sb.append("- É ESTRITAMENTE PROIBIDO FALAR EM TERCEIRA PESSOA (NÃO USE 'O atleta cumpriu', 'O corredor executou', 'fulano realizou'). Use sempre 'Você cumpriu', 'Você executou'.\n\n");
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
@@ -467,7 +470,6 @@ public class InsightService {
             sb.append(scientificContext).append("\n\n");
         }
 
-        // 🔒 HISTÓRICO PERMANECE AQUI NA ÁREA PRIVADA PARA EMBASAR A SEÇÃO 4.0
         sb.append("--- CONTEXTO HISTÓRICO DE LEITURA INTERNA (ÚLTIMAS ATIVIDADES GLOBAIS) ---\n");
         sb.append("ATENÇÃO IA: Use o histórico abaixo APENAS como base de conhecimento interna para avaliar a evolução na Seção 4.0. É PROIBIDO IMPRIMIR ESTE BLOCO NO TELEGRAM:\n");
         sb.append(historicoPerformanceGlobal).append("\n\n");
@@ -488,9 +490,6 @@ public class InsightService {
         sb.append("Média Real Rodagem (Terças): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append("\n");
         sb.append("Média Real Longão (Sábados): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append("\n\n");
 
-        // =================================================================
-        // 🚨 DIVISOR IMPERATIVO: A PARTIR DAQUI É APENAS O TEMPLATE DO TELEGRAM
-        // =================================================================
         sb.append("=================================================================\n");
         sb.append("🚨 DIRECTIVE DE SAÍDA EXCLUSIVA (ESTRITO CUMPRIMENTO MANDATÓRIO) 🚨\n");
         sb.append("=================================================================\n");
@@ -509,7 +508,7 @@ public class InsightService {
         java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
         java.util.Map<Integer, Integer> maxBpms = new java.util.HashMap<>();
         for (int bpm = hrRest; bpm <= hrMax; bpm++) {
-            int z = activityService.calculateKarvonenZone(bpm);
+            int z = activityService.calculateKarvonenZone(bpm, hrMax, hrRest);
             if (z > 0) {
                 minBpms.putIfAbsent(z, bpm);
                 maxBpms.put(z, bpm);
@@ -558,14 +557,14 @@ public class InsightService {
         sb.append("STATUS: [CUMPRIDO | CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO]\n");
         sb.append("[Escreva em texto corrido a justificativa técnica do cumprimento ou desvio do plano baseando-se no plano prescrito]\n\n");
 
-        sb.append("2.0 - 👨‍⚕️ DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtleta).append(":\n");
+        sb.append("2.0 - 👨‍⚕️ DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtletaReal).append(":\n");
         sb.append("[FOCO EXCLUSIVO: BIOQUÍMICA E CÉLULA]\n");
         sb.append("• Classifique o Efficiency Index (ex: Excelente, Eficiente).\n");
         sb.append("• Desenvolva a análise metabólica focando EXCLUSIVAMENTE nas vias energéticas (FatMax, oxidação lipídica, biogênese mitocondrial PGC-1alpha, preservação de glicogênio e depuração de lactato).\n");
         sb.append("• Cite formalmente os autores do MongoDB (Casanova et al., San-Millán & Brooks, Seiler).\n");
         sb.append("• É ESTRITAMENTE PROIBIDO citar desvio padrão em bpm, janelas instáveis ou oscilação de ritmo nesta seção.\n\n");
 
-        sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtleta).append("):\n");
+        sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtletaReal).append("):\n");
         sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA, PACE DRIFT E EFICIÊNCIA]\n");
         sb.append("• Desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(janelasInstaveis).append(" janelas móveis instáveis identificadas pelo sistema.\n");
@@ -577,7 +576,7 @@ public class InsightService {
                 .append("). Demonstre como a estabilidade do ritmo e o baixo custo cardiovascular por batimento hoje refletem ganhos reais em economia de corrida em relação à sua média histórica.\n");
 
         sb.append("• É ESTRITAMENTE PROIBIDO repetir explicações sobre PGC-1alpha, mitocôndrias ou autores já citados na Seção 2.0.\n\n");
-        sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtleta).append(":\n");
+        sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtletaReal).append(":\n");
         sb.append("• Escreva em texto corrido um parecer técnico e motivacional comparando o rendimento de HOJE com o histórico recente lido na orientação inicial (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
         sb.append("• É ESTRITAMENTE PROIBIDO escrever teorias longas sobre depleção de glicogênio ou comparações genéricas de dias da semana (foco na relação VO2 x Eficiência de hoje vs histórico).\n");
         sb.append("• NÃO IMPRIMA listas de treinos anteriores nesta seção.\n\n");
@@ -599,8 +598,6 @@ public class InsightService {
         sb.append("JUSTIFICATIVA TÉCNICA DA VARIAÇÃO ([Código da Variação]):\n");
         sb.append("[Explique o motivo exato da escolha da Variação com base no Efficiency Index Médio do atleta no dia correspondente]\n\n");
 
-
-
         sb.append("--- INSTRUÇÃO TÉCNICA DO SISTEMA ---\n");
         sb.append("Ao final do relatório, adicione OBRIGATORIAMENTE o bloco XML abaixo UMA ÚNICA VEZ:\n");
         sb.append("<prescription_data>\n");
@@ -617,7 +614,8 @@ public class InsightService {
 
     public record SessionMetrics(double fcMedia, double fcMax, int duracao, double stdDev, int zonaPredominante, double z2Percent, String comportamento, double fcMaxPercentage, double vo2MaxEstimado, double ganhoAlt, double efficiencyIndex, double safeDistance, String paceFormatted, Map<Integer, Double> zonePercentages) {}
 
-    private SessionMetrics calcularMetricasSessao(List<StravaActivity.MinuteAnalysis> analysis, Double distance, Double averageSpeed) {
+    private SessionMetrics calcularMetricasSessao(List<StravaActivity.MinuteAnalysis> analysis, Double distance, Double averageSpeed, UserEntity user) {
+
         double fcMedia = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).average().orElse(0.0);
         double fcMax = analysis.stream().map(StravaActivity.MinuteAnalysis::getMaxHeartRate).filter(Objects::nonNull).mapToDouble(Double::doubleValue).max().orElse(0.0);
         int duracao = analysis.size();
@@ -625,14 +623,14 @@ public class InsightService {
         double variance = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageHeartRate).filter(Objects::nonNull).mapToDouble(m -> Math.pow(m - fcMedia, 2)).average().orElse(0.0);
         double stdDev = Math.sqrt(variance);
 
-        int hrMax = activityService.getAthleteConfig().getHrMax();
-        int hrRest = activityService.getAthleteConfig().getHrResting();
+        int hrMax = user.getHrMax();
+        int hrRest = user.getHrResting();
 
         List<Double> hrData = analysis.stream()
                 .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
                 .filter(Objects::nonNull)
                 .toList();
-        Map<Integer, Double> zonePercentages = activityService.calculateZonePercentages(hrData);
+        Map<Integer, Double> zonePercentages = activityService.calculateZonePercentages(hrData, hrMax, hrRest);
 
         int zonaPredominante = zonePercentages.entrySet().stream()
                 .filter(entry -> entry.getKey() > 0)
@@ -708,15 +706,35 @@ public class InsightService {
         return String.format("%d:%02d", minutes, seconds);
     }
 
-    private String calcularProximaDataTreino(ZonedDateTime date) {
+    private String calcularProximaDataTreino(ZonedDateTime date, Set<DayOfWeek> diasDeTreino) {
         LocalDate today = LocalDate.now(ZONE_SP);
         LocalDate baseDate = date.toLocalDate().isBefore(today) ? today : date.toLocalDate();
         LocalDate dataIteracao = baseDate.plusDays(1);
-        Set<DayOfWeek> diasDeTreino = Set.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
-        while (!diasDeTreino.contains(dataIteracao.getDayOfWeek())) {
+
+        Set<DayOfWeek> diasValidos = (diasDeTreino != null && !diasDeTreino.isEmpty())
+                ? diasDeTreino
+                : Set.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
+
+        while (!diasValidos.contains(dataIteracao.getDayOfWeek())) {
             dataIteracao = dataIteracao.plusDays(1);
         }
         return dataIteracao.format(NEXT_WORKOUT_FORMATTER);
+    }
+
+    private int determinarCenarioAlvo(DayOfWeek diaAgendado, Set<DayOfWeek> diasDoAtleta) {
+        if (diasDoAtleta == null || diasDoAtleta.isEmpty()) {
+            return 1;
+        }
+
+        if (diasDoAtleta.size() == 1) {
+            return 1;
+        }
+
+        List<DayOfWeek> diasOrdenados = diasDoAtleta.stream()
+                .sorted(Comparator.comparingInt(DayOfWeek::getValue))
+                .toList();
+
+        return (diaAgendado == diasOrdenados.get(0)) ? 2 : 1;
     }
 
     private LocalDate parseNextWorkoutDate(String proximoTreinoData) {
@@ -747,19 +765,19 @@ public class InsightService {
                 .orElse(0.0);
     }
 
-    private String formatarHistoricoParaPrompt(List<ActivitySummaryEntity> historico, String rotuloTreino) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("--- HISTÓRICO DE %s ---\n", rotuloTreino.toUpperCase()));
-
-        if (historico == null || historico.isEmpty()) {
-            sb.append("  - Nenhum treino correspondente encontrado no banco até o momento.\n");
-        } else {
-            historico.stream()
-                    .limit(5)
-                    .forEach(t -> sb.append(String.format("  - %s: Efficiency Index: %.3f\n",
-                            t.getStartDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
-                            t.getEfficiencyIndex())));
+    private Set<DayOfWeek> parseTrainingDays(String trainingDaysStr) {
+        if (trainingDaysStr == null || trainingDaysStr.isBlank()) {
+            return Set.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
         }
-        return sb.toString();
+        try {
+            return java.util.Arrays.stream(trainingDaysStr.split(","))
+                    .map(String::trim)
+                    .map(String::toUpperCase)
+                    .map(DayOfWeek::valueOf)
+                    .collect(Collectors.toSet());
+        } catch (Exception e) {
+            log.warn("[USER] Falha ao converter trainingDays ('{}'). Usando padrão Terça/Quinta/Sábado.", trainingDaysStr);
+            return Set.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
+        }
     }
 }
