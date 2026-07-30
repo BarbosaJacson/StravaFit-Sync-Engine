@@ -6,9 +6,13 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ActivitySummaryRepository extends JpaRepository<ActivitySummaryEntity, Long> {
+
+    // 🎯 Busca um sumário existente pelo ID da atividade do Strava (essencial para o Upsert/Update)
+    Optional<ActivitySummaryEntity> findByActivityId(Long activityId);
 
     // 🎯 Consulta SQL nativa para buscar os últimos 10 treinos de uma determinada zona no seu MySQL da Aiven
     @Query(value = "SELECT * FROM activity_performance_summary WHERE dominant_zone = :dominantZone ORDER BY start_date DESC LIMIT 10", nativeQuery = true)

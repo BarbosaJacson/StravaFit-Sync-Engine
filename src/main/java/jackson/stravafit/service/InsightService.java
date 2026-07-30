@@ -210,7 +210,11 @@ public class InsightService {
                                        String cleanResult, String rawAiResponse,
                                        String tipoEstimuloReal, int cenarioDetectado, int nivelDetectado) {
         try {
-            ActivitySummaryEntity summary = activitySummaryRepository.findById(activityId).orElse(new ActivitySummaryEntity());
+            // 🎯 1. Busca por activityId diretamente para garantir que faremos UPDATE e não INSERT duplicado
+            ActivitySummaryEntity summary = activitySummaryRepository.findByActivityId(activityId)
+                    .orElseGet(() -> activitySummaryRepository.findById(activityId)
+                            .orElse(new ActivitySummaryEntity()));
+
             summary.setActivityId(activityId);
             summary.setStartDate(activityDate.toLocalDateTime());
             summary.setDistanceKm(metrics.safeDistance());
@@ -225,11 +229,12 @@ public class InsightService {
             summary.setDetectedLevel(nivelDetectado);
 
             activitySummaryRepository.saveAndFlush(summary);
-            log.info("[DB] Sumário de performance persistido com classificação para atividade: {}", activityId);
+            log.info("[DB] Sumário de performance persistido/atualizado com sucesso para atividade: {}", activityId);
 
+            // 🎯 2. Executa a extração da prescrição em seu próprio fluxo isolado
             self.extractAndSavePrescription(activityId, userId, rawAiResponse);
         } catch (Exception e) {
-            log.error("[DB] Falha ao persistir dados técnicos: {}", e.getMessage(), e);
+            log.error("[DB] Falha ao persistir dados técnicos para a atividade {}: {}", activityId, e.getMessage());
         }
     }
 

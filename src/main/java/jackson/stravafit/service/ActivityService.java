@@ -6,6 +6,7 @@ import jackson.stravafit.model.MinuteAnalysisEntity;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.repository.ActivityRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ActivityService {
@@ -48,29 +50,57 @@ public class ActivityService {
 
     @Transactional
     public void saveActivity(StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone, String insight) {
-        if (activity.getId() == null || activityRepository.existsById(activity.getId())) return;
+        if (activity == null || activity.getId() == null) {
+            log.warn("[SAVE] Tentativa de salvar atividade nula ou sem ID.");
+            return;
+        }
 
         List<MinuteAnalysisEntity> minuteEntities = minutes.stream()
                 .map(m -> new MinuteAnalysisEntity(null, m.getMinute(), m.getAverageHeartRate(), m.getMaxHeartRate(), m.getZone(), m.getAverageElevation(), m.getAverageCadence()))
                 .toList();
 
-        ActivityEntity entity = new ActivityEntity(
-                activity.getId(),
-                activity.getName(),
-                activity.getStartDateLocal(),
-                activity.getDistance() / 1000.0,
-                activity.getAverageHeartRate(),
-                activity.getMaxHeartRate(),
-                activity.getSportType(),
-                zone,
-                (int) (activity.getElapsedTime() / 60.0),
-                insight,
-                new ArrayList<>(minuteEntities)
-        );
+        // Lógica de "Upsert": Tenta buscar a atividade existente para atualizar, ou cria uma nova se não existir.
+        ActivityEntity entity = activityRepository.findById(activity.getId())
+                .map(existing -> {
+                    log.info("[DB] Atividade {} já existe. Atualizando dados...", activity.getId());
+                    existing.setName(activity.getName());
+                    existing.setStartDate(activity.getStartDateLocal());
+                    existing.setDistanceKm(activity.getDistance() / 1000.0);
+                    existing.setAverageHeartRate(activity.getAverageHeartRate());
+                    existing.setMaxHeartRate(activity.getMaxHeartRate());
+                    existing.setSportType(activity.getSportType());
+                    existing.setDominantZone(zone);
+                    existing.setTotalTimeMinutes((int) (activity.getElapsedTime() / 60.0));
+                    existing.setGeminiInsight(insight);
 
+                    // Limpa e atualiza a análise minuto a minuto
+                    existing.getMinuteDetails().clear();
+                    existing.getMinuteDetails().addAll(minuteEntities);
+
+                    return existing;
+                })
+                .orElseGet(() -> {
+                    log.info("[DB] Atividade {} não encontrada. Criando nova entidade...", activity.getId());
+                    return new ActivityEntity(
+                            activity.getId(),
+                            activity.getName(),
+                            activity.getStartDateLocal(),
+                            activity.getDistance() / 1000.0,
+                            activity.getAverageHeartRate(),
+                            activity.getMaxHeartRate(),
+                            activity.getSportType(),
+                            zone,
+                            (int) (activity.getElapsedTime() / 60.0),
+                            insight,
+                            new ArrayList<>(minuteEntities)
+                    );
+                });
+
+        // O método save do JPA lida com INSERT e UPDATE automaticamente.
+        // Esta única chamada resolve o problema de duplicidade e o erro de compilação.
         activityRepository.save(entity);
+        log.info("[DB] Atividade {} salva/atualizada com sucesso no banco.", entity.getId());
     }
-
     /**
      * Transforma dados de segundos em médias por minuto e identifica a zona cardíaca com base nos dados biométricos do atleta (MySQL).
      */
@@ -165,16 +195,15 @@ public class ActivityService {
 
         int z1Min = hrResting + (int) Math.round(0.50 * hrReserve);
         int z1Max = hrResting + (int) Math.round(0.59 * hrReserve);
-
         int z2Max = hrResting + (int) Math.round(0.72 * hrReserve);
-        int cinzaMax = hrResting + (int) Math.round(0.79 * hrReserve);
-        int z34Max = hrResting + (int) Math.round(0.89 * hrReserve);
+        int z3Max = hrResting + (int) Math.round(0.82 * hrReserve);
+        int z4Max = hrResting + (int) Math.round(0.92 * hrReserve);
 
         if (bpmInt < z1Min) return 0;
         if (bpmInt <= z1Max) return 1;
         if (bpmInt <= z2Max) return 2;
-        if (bpmInt <= cinzaMax) return 0; // Zona Cinzenta
-        if (bpmInt <= z34Max) return 3;
+        if (bpmInt <= z3Max) return 3;
+        if (bpmInt <= z4Max) return 4; // 🎯 Zona 4 Mapeada!
 
         return 5;
     }
