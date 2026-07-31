@@ -47,12 +47,15 @@ public class StravaActivity {
 
     private Double calories;
 
+    @JsonProperty("start_latlng")
+    private List<Double> startLatlng;
+
     // Construtor padrão
     public StravaActivity() {
     }
 
-    // Construtor com todos os argumentos
-    public StravaActivity(Long id, String name, Double distance, Integer movingTime, Integer elapsedTime, Double totalElevationGain, String sportType, String startDateLocal, Double averageSpeed, Double maxSpeed, Boolean hasHeartRate, Double averageHeartRate, Double maxHeartRate, StravaAthlete athlete, Double calories) {
+    // Construtor com todos os argumentos (incluindo startLatlng)
+    public StravaActivity(Long id, String name, Double distance, Integer movingTime, Integer elapsedTime, Double totalElevationGain, String sportType, String startDateLocal, Double averageSpeed, Double maxSpeed, Boolean hasHeartRate, Double averageHeartRate, Double maxHeartRate, StravaAthlete athlete, Double calories, List<Double> startLatlng) {
         this.id = id;
         this.name = name;
         this.distance = distance;
@@ -68,6 +71,7 @@ public class StravaActivity {
         this.maxHeartRate = maxHeartRate;
         this.athlete = athlete;
         this.calories = calories;
+        this.startLatlng = startLatlng;
     }
 
     // Getters
@@ -86,6 +90,16 @@ public class StravaActivity {
     public Double getMaxHeartRate() { return maxHeartRate; }
     public StravaAthlete getAthlete() { return athlete; }
     public Double getCalories() { return calories; }
+    public List<Double> getStartLatlng() { return startLatlng; }
+
+    // Helpers para clima / localização
+    public Double getLatitude() {
+        return (startLatlng != null && startLatlng.size() >= 2) ? startLatlng.get(0) : null;
+    }
+
+    public Double getLongitude() {
+        return (startLatlng != null && startLatlng.size() >= 2) ? startLatlng.get(1) : null;
+    }
 
     // Setters
     public void setId(Long id) { this.id = id; }
@@ -103,6 +117,7 @@ public class StravaActivity {
     public void setMaxHeartRate(Double maxHeartRate) { this.maxHeartRate = maxHeartRate; }
     public void setAthlete(StravaAthlete athlete) { this.athlete = athlete; }
     public void setCalories(Double calories) { this.calories = calories; }
+    public void setStartLatlng(List<Double> startLatlng) { this.startLatlng = startLatlng; }
 
     public double distanceKm() {
         return distance != null ? distance / 1000 : 0.0;
@@ -128,7 +143,7 @@ public class StravaActivity {
     public static class ZoneBucket {
         private Double min;
         private Double max;
-        private Integer time; // tempo em segundos nesta zona
+        private Integer time;
 
         public ZoneBucket() {}
         public ZoneBucket(Double min, Double max, Integer time) { this.min = min; this.max = max; this.time = time; }
@@ -189,8 +204,8 @@ public class StravaActivity {
     public static class AthleteInsight {
         private String athleteId;
         private String lastActivityDate;
-        private String summarizedStatus; // Texto gerado pelo Gemini
-        private Double fitnessScore;     // Uma métrica calculada pela sua lógica
+        private String summarizedStatus;
+        private Double fitnessScore;
 
         public AthleteInsight() {}
         public AthleteInsight(String athleteId, String lastActivityDate, String summarizedStatus, Double fitnessScore) {
@@ -210,7 +225,7 @@ public class StravaActivity {
         public void setSummarizedStatus(String summarizedStatus) { this.summarizedStatus = summarizedStatus; }
         public void setFitnessScore(Double fitnessScore) { this.fitnessScore = fitnessScore; }
     }
-    // DTO interno para mapear o id do atleta no payload do Strava
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class StravaAthlete {
         private Long id;
@@ -238,13 +253,13 @@ public class StravaActivity {
     @Override
     public String toString() {
         return "StravaActivity{" +
-               "id=" + id +
-               ", name='" + name + '\'' +
-               ", distance=" + distance +
-               ", sportType='" + sportType + '\'' +
-               ", startDateLocal='" + startDateLocal + '\'' +
-               ", averageSpeed=" + averageSpeed +
-               ", averageHeartRate=" + averageHeartRate +
-               '}';
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", distance=" + distance +
+                ", sportType='" + sportType + '\'' +
+                ", startDateLocal='" + startDateLocal + '\'' +
+                ", averageSpeed=" + averageSpeed +
+                ", averageHeartRate=" + averageHeartRate +
+                '}';
     }
 }

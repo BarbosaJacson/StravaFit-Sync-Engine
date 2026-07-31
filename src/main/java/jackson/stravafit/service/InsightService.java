@@ -6,7 +6,9 @@ import jackson.stravafit.repository.ActivityRepository;
 import jackson.stravafit.repository.ActivitySummaryRepository;
 import jackson.stravafit.repository.UserRepository;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -30,6 +32,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+
+
 @Slf4j
 @Service
 public class InsightService {
@@ -42,11 +46,13 @@ public class InsightService {
     private final UserRepository userRepository;
     private final KnowledgeService knowledgeService;
     private final InsightService self;
+    private final OpenMeteoService openMeteoService;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     private static final DateTimeFormatter BRAZIL_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
     private static final DateTimeFormatter NEXT_WORKOUT_FORMATTER = DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy");
 
+    @Autowired
     public InsightService(GeminiClient geminiClient,
                           ActivityRepository activityRepository,
                           WorkoutPrescriptionRepository workoutPrescriptionRepository,
@@ -54,7 +60,7 @@ public class InsightService {
                           UserRepository userRepository,
                           ActivityService activityService,
                           @Lazy InsightService self,
-                          KnowledgeService knowledgeService) {
+                          KnowledgeService knowledgeService, OpenMeteoService openMeteoService) {
         this.geminiClient = geminiClient;
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
@@ -63,6 +69,7 @@ public class InsightService {
         this.activityService = activityService;
         this.self = self;
         this.knowledgeService = knowledgeService;
+        this.openMeteoService = openMeteoService;
     }
 
     public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {}
@@ -70,25 +77,40 @@ public class InsightService {
     @Transactional
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
 
-        // 🎯 1. Tenta identificar o atleta pelo Strava (Com fallback seguro para o usuário 1L)
+        // 1. Identifica o usuário
         Long athleteIdStrava = (activity != null && activity.getAthlete() != null) ? activity.getAthlete().getId() : null;
-
         UserEntity user = Optional.ofNullable(athleteIdStrava)
                 .flatMap(userRepository::findByStravaAthleteId)
                 .orElseGet(() -> userRepository.findById(1L)
                         .orElseThrow(() -> new IllegalStateException("Atleta principal (ID 1) não cadastrado no MySQL.")));
 
-        return generateInsight(
+        // 2. Busca o clima do GPS
+        Double lat = activity != null ? activity.getLatitude() : null;
+        Double lng = activity != null ? activity.getLongitude() : null;
+        WeatherData weather = openMeteoService.getWeatherForLocation(lat, lng);
+
+        String climaHeader = (weather != null && weather.hasData())
+                ? weather.toTelegramFormat()
+                : "🌤️ CLIMA DURANTE O TREINO: Dados indisponíveis";
+
+        // 🎯 3. Executa o generateInsight passando TODOS os dados necessários!
+        // Ele processa os cálculos e a chamada ao Gemini, devolvendo o texto do parecer.
+        String insightDaIA = generateInsight(
                 user,
                 activity.getId(),
                 activity.getName(),
                 activity.getDistance() != null ? activity.getDistance() / 1000.0 : 0.0,
                 activity.getStartDateLocal(),
                 activity.getAverageSpeed() != null ? activity.getAverageSpeed() * 3.6 : 0.0,
-                analysis);
+                analysis,
+                activity,
+                climaHeader);
+
+        // 🎯 4. Junta a linha do clima no topo com o texto retornado pela IA e entrega o resultado final!
+        return climaHeader + "\n\n" + insightDaIA;
     }
 
-    private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis) {
+    private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, StravaActivity activity,String climaHeader) {
 
         // 1. Primeiro calculamos as métricas essenciais e as datas baseadas nas preferências do atleta
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
@@ -195,10 +217,11 @@ public class InsightService {
         // 11. Passamos o prompt estruturado com todas as variáveis instanciadas e o 'user'
         String prompt = buildProfessionalPrompt(user, name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null),
                 nivelCenario1, nivelCenario2, tipoEstimuloReal, janelasInstaveis,
-                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo, historicoPerformanceGlobal);
+                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo, historicoPerformanceGlobal, climaHeader);
 
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
+
 
         // 12. Persiste os dados técnicos calculados oficialmente no MySQL
         self.persistirDadosTecnicos(activityId, user.getId(), activityDate, metrics, cleanResult, rawAiResponse, tipoEstimuloReal, cenarioDetectado, nivelDetectado);
@@ -436,7 +459,9 @@ public class InsightService {
                                            double mediaEficienciaTiros,
                                            double mediaEficienciaZ2Curto,
                                            double mediaEficienciaZ2Longo,
-                                           String historicoPerformanceGlobal) {
+                                           String historicoPerformanceGlobal,
+                                           String climaHeader
+                                           ) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
         List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
@@ -459,10 +484,14 @@ public class InsightService {
 
         sb.append("🚨 REGRA MANDATÓRIA DE LINGUAGEM E TOM DE VOZ:\n");
         sb.append("- FALE DIRETAMENTE COM O ATLETA (").append(nomeAtletaReal.toUpperCase()).append(") EM PRIMEIRA PESSOA DO SINGULAR ('Eu analisei', 'Eu observei', 'Identifiquei').\n");
-        sb.append("- TRATE O ATLETA DIRETAMENTE POR 'VOCÊ' OU PELO NOME ('").append(nomeAtletaReal).append("').\n");
+        sb.append("- TRATE O ATLETA DIRETAMENTE POR 'VOCÊ' OU PELO NOME DE FORMA AMIGÁVEL DE UM TREINADOR QUE TEM AMIZADE COM O ATLETA ('").append(nomeAtletaReal).append("').\n");
         sb.append("- É ESTRITAMENTE PROIBIDO FALAR EM TERCEIRA PESSOA (NÃO USE 'O atleta cumpriu', 'O corredor executou', 'fulano realizou'). Use sempre 'Você cumpriu', 'Você executou'.\n\n");
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
+        sb.append("--- CONDIÇÕES CLIMÁTICAS NO MOMENTO DO TREINO ---\n");
+        sb.append(climaHeader).append("\n");
+
+        sb.append("INSTRUÇÃO FISIOLÓGICA: Considere o estresse térmico acima na análise. Se a umidade for alta (>80%) ou a temperatura for elevada (>25°C), mencione o impacto no aumento da Frequência Cardíaca (débito cardíaco) para termorregulação e dê recomendações de hidratação e recuperação.\n\n");
 
         sb.append("--- CLASSIFICAÇÃO FISIOLÓGICA REAL DA ATIVIDADE (CÁLCULO MATEMÁTICO DO SISTEMA) ---\n");
         sb.append("- TIPO DE ESTÍMULO EXECUTADO HOJE: ").append(tipoEstimuloReal).append("\n");
@@ -508,6 +537,8 @@ public class InsightService {
         sb.append("📌 CENÁRIO: [Título Exato do Cenário do MongoDB]\n\n");
         sb.append("⚡ INTENSIDADE: [Mapear Intensidade baseada na Zona Predominante] | Estabilidade Fisiológica: ").append(String.format("%.1f", metrics.stdDev())).append(" bpm (Desvio Padrão)\n\n");
         sb.append("📊 MÉTRICAS: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
+        sb.append("🌤️ CLIMA: ").append(climaHeader).append("\n\n");
+
 
         sb.append("📊 ESFORÇO POR ZONA CARDÍACA:\n");
         java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
@@ -572,6 +603,9 @@ public class InsightService {
         sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtletaReal).append("):\n");
         sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA, PACE DRIFT E EFICIÊNCIA]\n");
         sb.append("• Desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
+        sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
+        sb.append("  - Dados Climáticos: ").append(climaHeader).append("\n");
+        sb.append("  - Elevação do Treino: ").append(String.format("%.0f metros", metrics.ganhoAlt())).append(" de ganho altimétrico\n");
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(janelasInstaveis).append(" janelas móveis instáveis identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
         sb.append("• CORRELAÇÃO POSITIVA (VO2MÁX x EFIC): Explique como o VO2máx estimado de hoje (")
