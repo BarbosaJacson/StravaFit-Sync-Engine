@@ -9,9 +9,7 @@ import jackson.stravafit.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
@@ -29,7 +27,7 @@ public class SyncScheduler {
     private final TelegramClient telegramClient;
     private final ActivityRepository activityRepository;
     private final UserRepository userRepository;
-    private final ConfigurableApplicationContext context;
+    // Removido: ConfigurableApplicationContext context
 
     @Value("${strava.auto-start:false}")
     private boolean autoStart;
@@ -57,7 +55,7 @@ public class SyncScheduler {
             if (response.activities().isEmpty()) {
                 log.warn("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
                 enviarLembreteUltimoInsight();
-                encerrarAplicacaoGraciosamente();
+                // Removido: encerrarAplicacaoGraciosamente()
                 return false;
             }
 
@@ -66,14 +64,14 @@ public class SyncScheduler {
             if (activityRepository.existsById(activity.getId())) {
                 log.info("-> Treino do dia (" + activity.getName() + ") já analisado. Acionando fallback de reenvio...");
                 enviarLembreteUltimoInsight();
-                encerrarAplicacaoGraciosamente();
+                // Removido: encerrarAplicacaoGraciosamente()
                 return false;
             }
 
             log.info("-> NOVO TREINO DETECTADO: " + activity.getName());
             processarEEnviar(this.accessToken, activity);
 
-            encerrarAplicacaoGraciosamente();
+            // Removido: encerrarAplicacaoGraciosamente()
             return true;
 
         } catch (HttpClientErrorException.Unauthorized e) {
@@ -81,12 +79,13 @@ public class SyncScheduler {
                 return executarSincronizacao();
             } else {
                 log.error("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
-                encerrarAplicacaoGraciosamente();
+                // Removido: encerrarAplicacaoGraciosamente()
                 return false;
             }
         } catch (Exception e) {
+            // ISSO CAPTURA O "BROKEN PIPE" E IMPEDE QUE A APLICAÇÃO MORRA
             log.error("ERRO NA SINCRONIZAÇÃO: " + e.getMessage());
-            encerrarAplicacaoGraciosamente();
+            // Removido: encerrarAplicacaoGraciosamente()
             return false;
         }
     }
@@ -135,18 +134,7 @@ public class SyncScheduler {
         }, () -> log.warn("   [FALLBACK] Nenhum treino encontrado no banco de dados para reenvio."));
     }
 
-    private void encerrarAplicacaoGraciosamente() {
-        new Thread(() -> {
-            try {
-                log.info("[SHUTDOWN] Aguardando 3 segundos para consolidação dos buffers de rede...");
-                Thread.sleep(3000);
-                log.info("[SHUTDOWN] Fechando o container Spring Boot de forma limpa.");
-                SpringApplication.exit(context, () -> 0);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }).start();
-    }
+    // Removido por completo: método encerrarAplicacaoGraciosamente()
 
     private boolean isValidInsight(String insight) {
         return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
