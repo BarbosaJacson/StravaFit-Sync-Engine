@@ -84,10 +84,21 @@ public class InsightService {
                 .orElseGet(() -> userRepository.findById(1L)
                         .orElseThrow(() -> new IllegalStateException("Atleta principal (ID 1) não cadastrado no MySQL.")));
 
-        // 2. Busca o clima do GPS
         Double lat = activity != null ? activity.getLatitude() : null;
         Double lng = activity != null ? activity.getLongitude() : null;
-        WeatherData weather = openMeteoService.getWeatherForLocation(lat, lng);
+
+// Converte a String de data do Strava para LocalDateTime tratando o formato ISO
+        LocalDateTime startDate = null;
+        if (activity != null && activity.getStartDateLocal() != null) {
+            try {
+                String dateStr = activity.getStartDateLocal().replace("Z", "");
+                startDate = LocalDateTime.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            } catch (Exception e) {
+                log.warn("[CLIMA] Falha ao converter data da atividade: {}", e.getMessage());
+            }
+        }
+
+        WeatherData weather = openMeteoService.getWeatherForLocation(lat, lng, startDate);
 
         String climaHeader = (weather != null && weather.hasData())
                 ? weather.toTelegramFormat()
@@ -107,7 +118,7 @@ public class InsightService {
                 climaHeader);
 
         // 🎯 4. Junta a linha do clima no topo com o texto retornado pela IA e entrega o resultado final!
-        return climaHeader + "\n\n" + insightDaIA;
+        return insightDaIA;
     }
 
     private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, StravaActivity activity,String climaHeader) {
@@ -410,7 +421,7 @@ public class InsightService {
             return new ClassificacaoResultado("NÃO IDENTIFICADO (DADOS INSUFICIENTES)", 0);
         }
 
-        int contagemJanelasInstaveis = 0;
+        int picosIntervalados = 0;
         int tamanhoJanela = 3;
 
         List<Double> frequencias = analysis.stream()
@@ -432,22 +443,22 @@ public class InsightService {
                     .orElse(0.0);
 
             if (Math.sqrt(varianciaJanela) >= 8.0) {
-                contagemJanelasInstaveis++;
+                picosIntervalados++;
             }
         }
 
         double amplitudeCardiaca = fcMax - fcMedia;
 
         log.info("[CLASSIFICADOR] Picos instáveis (>8bpm): {} | Amplitude (Max - Média): {} bpm | StdDev Global: {} bpm",
-                contagemJanelasInstaveis,
+                picosIntervalados,
                 String.format("%.1f", amplitudeCardiaca),
                 String.format("%.1f", stdDevGlobal));
 
-        if (contagemJanelasInstaveis >= 6 || (amplitudeCardiaca >= 20.0 && contagemJanelasInstaveis >= 3)) {
-            return new ClassificacaoResultado("INTENSO / INTERVALADO (TIROS)", contagemJanelasInstaveis);
+        if (picosIntervalados >= 6 || (amplitudeCardiaca >= 20.0 && picosIntervalados >= 3)) {
+            return new ClassificacaoResultado("INTENSO / INTERVALADO (TIROS)", picosIntervalados);
         }
 
-        return new ClassificacaoResultado("CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)", contagemJanelasInstaveis);
+        return new ClassificacaoResultado("CONTÍNUO / ESTÁVEL (RODAGEM OU LONGÃO)", picosIntervalados);
     }
 
     private String buildProfessionalPrompt(UserEntity user, String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData,
@@ -455,7 +466,7 @@ public class InsightService {
                                            int nivelCenario1,
                                            int nivelCenario2,
                                            String tipoEstimuloReal,
-                                           int janelasInstaveis,
+                                           int picosIntervalados,
                                            double mediaEficienciaTiros,
                                            double mediaEficienciaZ2Curto,
                                            double mediaEficienciaZ2Longo,
@@ -489,14 +500,13 @@ public class InsightService {
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
         sb.append("--- CONDIÇÕES CLIMÁTICAS NO MOMENTO DO TREINO ---\n");
-        sb.append(climaHeader).append("\n");
 
         sb.append("INSTRUÇÃO FISIOLÓGICA: Considere o estresse térmico acima na análise. Se a umidade for alta (>80%) ou a temperatura for elevada (>25°C), mencione o impacto no aumento da Frequência Cardíaca (débito cardíaco) para termorregulação e dê recomendações de hidratação e recuperação.\n\n");
 
         sb.append("--- CLASSIFICAÇÃO FISIOLÓGICA REAL DA ATIVIDADE (CÁLCULO MATEMÁTICO DO SISTEMA) ---\n");
         sb.append("- TIPO DE ESTÍMULO EXECUTADO HOJE: ").append(tipoEstimuloReal).append("\n");
         sb.append("- DESVIO PADRÃO DA FC DO TREINO: ").append(String.format("%.2f", metrics.stdDev())).append(" bpm\n");
-        sb.append("- JANELAS MÓVEIS INSTÁVEIS (3m, Desvio >= 8.0 bpm): ").append(janelasInstaveis).append(" disparos identificados\n");
+        sb.append("- PICOS INTERVALADOS BPM (3m, Desvio >= 8.0 bpm): ").append(picosIntervalados).append(" disparos identificados\n");
         sb.append("- INSTRUÇÃO DE CENÁRIO: Se o estímulo foi 'INTENSO / INTERVALADO (TIROS)', acione o 'CENÁRIO 2'. Se foi 'CONTÍNUO / ESTÁVEL', acione o 'CENÁRIO 1'.\n\n");
 
         if (scientificContext != null && !scientificContext.isBlank()) {
@@ -534,11 +544,10 @@ public class InsightService {
 
         sb.append("🏃‍♂️ StravaFit IA - Análise de Eficiência Metabólica\n\n");
         sb.append(dataFormatada).append("\n");
+        sb.append("🌤️ CLIMA: ").append(climaHeader).append("\n\n");
         sb.append("📌 CENÁRIO: [Título Exato do Cenário do MongoDB]\n\n");
         sb.append("⚡ INTENSIDADE: [Mapear Intensidade baseada na Zona Predominante] | Estabilidade Fisiológica: ").append(String.format("%.1f", metrics.stdDev())).append(" bpm (Desvio Padrão)\n\n");
         sb.append("📊 MÉTRICAS: ").append(String.format("%.1f km", metrics.safeDistance())).append(" | ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append(" | Pace: ").append(metrics.paceFormatted()).append("\n\n");
-        sb.append("🌤️ CLIMA: ").append(climaHeader).append("\n\n");
-
 
         sb.append("📊 ESFORÇO POR ZONA CARDÍACA:\n");
         java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
@@ -591,22 +600,24 @@ public class InsightService {
         String dataTreinoFormatada = date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
         sb.append("1.0 - 📋 CUMPRIMENTO DO PLANO PARA O TREINO DE ").append(dataTreinoFormatada).append(":\n");
         sb.append("STATUS: [CUMPRIDO | CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO]\n");
-        sb.append("[Escreva em texto corrido a justificativa técnica do cumprimento ou desvio do plano baseando-se no plano prescrito]\n\n");
+        sb.append("[Escreva em texto corrido a justificativa técnica do cumprimento ou desvio do plano baseando-se no plano prescrito. Use o nome do atleta (").append(nomeAtletaReal).append(") no texto de forma amigável e próxima]\n\n");
 
-        sb.append("2.0 - 👨‍⚕️ DIAGNÓSTICO TÉCNICO FISIOLÓGICO PARA ").append(nomeAtletaReal).append(":\n");
+        sb.append("2.0 - 👨‍⚕️ DIAGNÓSTICO TÉCNICO FISIOLÓGICO");
         sb.append("[FOCO EXCLUSIVO: BIOQUÍMICA E CÉLULA]\n");
-        sb.append("• Classifique o Efficiency Index (ex: Excelente, Eficiente).\n");
+        sb.append("• Classifique o Efficiency Index de hoje (")
+                .append(String.format("%.3f", metrics.efficiencyIndex()))
+                .append(") Se dirija ao atleta pelo nome, e compare o EfficiencyIndex com a tabela 'legendas_eficiencia_gerais' presente no contexto científico (scientificContext). Imprima EXATAMENTE e APENAS o texto da linha/legenda correspondente (com o emoji(bolinha colorida) e intervalo).\n");
         sb.append("• Desenvolva a análise metabólica focando EXCLUSIVAMENTE nas vias energéticas (FatMax, oxidação lipídica, biogênese mitocondrial PGC-1alpha, preservação de glicogênio e depuração de lactato).\n");
         sb.append("• Cite formalmente os autores do MongoDB (Casanova et al., San-Millán & Brooks, Seiler).\n");
-        sb.append("• É ESTRITAMENTE PROIBIDO citar desvio padrão em bpm, janelas instáveis ou oscilação de ritmo nesta seção.\n\n");
+        sb.append("• É ESTRITAMENTE PROIBIDO citar desvio padrão em bpm, picos intervalados ou oscilação de ritmo nesta seção.\n\n");
 
-        sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (").append(nomeAtletaReal).append("):\n");
+        sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (");
         sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA, PACE DRIFT E EFICIÊNCIA]\n");
-        sb.append("• Desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
+        sb.append("• Use o nome do atleta e desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
         sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
         sb.append("  - Dados Climáticos: ").append(climaHeader).append("\n");
         sb.append("  - Elevação do Treino: ").append(String.format("%.0f metros", metrics.ganhoAlt())).append(" de ganho altimétrico\n");
-        sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(janelasInstaveis).append(" janelas móveis instáveis identificadas pelo sistema.\n");
+        sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" picos intervalados identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
         sb.append("• CORRELAÇÃO POSITIVA (VO2MÁX x EFIC): Explique como o VO2máx estimado de hoje (")
                 .append(String.format("%.1f", metrics.vo2MaxEstimado()))
@@ -615,8 +626,8 @@ public class InsightService {
                 .append("). Demonstre como a estabilidade do ritmo e o baixo custo cardiovascular por batimento hoje refletem ganhos reais em economia de corrida em relação à sua média histórica.\n");
 
         sb.append("• É ESTRITAMENTE PROIBIDO repetir explicações sobre PGC-1alpha, mitocôndrias ou autores já citados na Seção 2.0.\n\n");
-        sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO PARA ").append(nomeAtletaReal).append(":\n");
-        sb.append("• Escreva em texto corrido um parecer técnico e motivacional comparando o rendimento de HOJE com o histórico recente lido na orientação inicial (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
+        sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO \n");
+        sb.append("• Escreva em texto corrido um parecer técnico e motivacional, use o nome do atleta de forma informal comparando o rendimento de HOJE com o histórico recente lido na orientação inicial (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
         sb.append("• É ESTRITAMENTE PROIBIDO escrever teorias longas sobre depleção de glicogênio ou comparações genéricas de dias da semana (foco na relação VO2 x Eficiência de hoje vs histórico).\n");
         sb.append("• NÃO IMPRIMA listas de treinos anteriores nesta seção.\n\n");
         sb.append("• Encerre com uma mensagem encorajadora e crie conexão amigável com o atleta rumo à Meia Maratona de 31/10/2026.\n\n");
