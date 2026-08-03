@@ -175,15 +175,20 @@ public class StravaActivity {
         private int zone;
         private double averageElevation;
         private double averageCadence;
+        private double normalizedSpeedMpm;
+        private double normalizedPaceMinKm;
 
         public MinuteAnalysis() {}
-        public MinuteAnalysis(int minute, double averageHeartRate, double maxHeartRate, int zone, double averageElevation, double averageCadence) {
+        public MinuteAnalysis(int minute, double averageHeartRate, double maxHeartRate, int zone, double averageElevation, double averageCadence, double normalizedSpeedMpm, double normalizedPaceMinKm) {
             this.minute = minute;
             this.averageHeartRate = averageHeartRate;
             this.maxHeartRate = maxHeartRate;
             this.zone = zone;
             this.averageElevation = averageElevation;
             this.averageCadence = averageCadence;
+            this.normalizedSpeedMpm = normalizedSpeedMpm;
+            this.normalizedPaceMinKm = normalizedPaceMinKm;
+
         }
 
         public int getMinute() { return minute; }
@@ -192,6 +197,8 @@ public class StravaActivity {
         public int getZone() { return zone; }
         public double getAverageElevation() { return averageElevation; }
         public double getAverageCadence() { return averageCadence; }
+        public double getNormalizedSpeedMpm() { return normalizedSpeedMpm; }
+        public double getNormalizedPaceMinKm() { return normalizedPaceMinKm; }
 
         public void setMinute(int minute) { this.minute = minute; }
         public void setAverageHeartRate(double averageHeartRate) { this.averageHeartRate = averageHeartRate; }
@@ -199,6 +206,8 @@ public class StravaActivity {
         public void setZone(int zone) { this.zone = zone; }
         public void setAverageElevation(double averageElevation) { this.averageElevation = averageElevation; }
         public void setAverageCadence(double averageCadence) { this.averageCadence = averageCadence; }
+        public void setNormalizedSpeedMpm(double normalizedSpeedMpm) { this.normalizedSpeedMpm = normalizedSpeedMpm; }
+        public void setNormalizedPaceMinKm(double normalizedPaceMinKm) { this.normalizedPaceMinKm = normalizedPaceMinKm; }
     }
 
     public static class AthleteInsight {

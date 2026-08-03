@@ -707,7 +707,15 @@ public class InsightService {
         if (ganhoAlt < 0 || elevStats.getCount() == 0) ganhoAlt = 0.0;
 
         double safeDistance = distance != null ? distance : 0.0;
-        double efficiencyIndex = (fcMedia > 0 && duracao > 0) ? (safeDistance * 1000.0) / (fcMedia * duracao) : 0.0;
+        // 🎯 Calcula o total de metros normalizados com compensação de altimetria (Minetti)
+        double totalMetrosNormalizados = (analysis != null && !analysis.isEmpty())
+                ? analysis.stream().mapToDouble(StravaActivity.MinuteAnalysis::getNormalizedSpeedMpm).sum()
+                : 0.0;
+
+// Se houver cálculo normalizado, usa ele; caso contrário, recorre à distância bruta como fallback
+        double metrosParaCalculo = totalMetrosNormalizados > 0 ? totalMetrosNormalizados : (safeDistance * 1000.0);
+
+        double efficiencyIndex = (fcMedia > 0 && duracao > 0) ? metrosParaCalculo / (fcMedia * duracao) : 0.0;
         String paceFormatted = formatSpeedToPace(averageSpeed);
 
         return new SessionMetrics(fcMedia, fcMax, duracao, stdDev, zonaPredominante, z2Percent, comportamento, fcMaxPercentage, vo2MaxEstimado, ganhoAlt, efficiencyIndex, safeDistance, paceFormatted, zonePercentages);

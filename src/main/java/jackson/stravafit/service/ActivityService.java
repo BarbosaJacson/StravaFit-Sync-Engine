@@ -115,6 +115,7 @@ public class ActivityService {
         List<Double> hrData = extractStream(streams, "heartrate");
         List<Double> altData = extractStream(streams, "altitude");
         List<Double> cadData = extractStream(streams, "cadence");
+        List<Double> distData = extractStream(streams, "distance");
 
         if (hrData == null || hrData.isEmpty()) return analysis;
 
@@ -127,10 +128,15 @@ public class ActivityService {
             double avgAlt = getAverage(altData, i, end);
             double avgCad = getAverage(cadData, i, end);
 
+            // 🎯 CÁLCULO DENTRO DO LOOP PARA CADA MINUTO ESPECÍFICO:
+            double normalizedSpeedMpm = calculateMinuteNormalizedSpeed(distData, altData, i, end);
+            double normalizedPaceMinKm = normalizedSpeedMpm > 0 ? (1000.0 / normalizedSpeedMpm) : 0.0;
+
             int minuteNumber = (i / 60) + 1;
             int zoneDetected = calculateKarvonenZone(avgHr, hrMax, hrResting);
 
-            analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad));
+            analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad,
+                    normalizedSpeedMpm, normalizedPaceMinKm));
         }
         return analysis;
     }
@@ -235,4 +241,39 @@ public class ActivityService {
             List<StravaActivity> activities,
             int rawCount
     ) {}
+
+    private double calculateMinuteNormalizedSpeed(List<Double> distData, List<Double> altData, int start, int end) {
+        if (distData == null || distData.isEmpty() || altData == null || altData.isEmpty() || start >= distData.size()) {
+            return 0.0;
+        }
+
+        int actualEnd = Math.min(end, distData.size());
+        int actualAltEnd = Math.min(end, altData.size());
+
+        double distDelta = distData.get(actualEnd - 1) - distData.get(start);
+        double altDelta = altData.get(actualAltEnd - 1) - altData.get(Math.min(start, altData.size() - 1));
+
+        if (distDelta <= 0) return 0.0;
+
+        double grade = altDelta / distDelta;
+        double minettiFactor = calculateMinettiCostFactor(grade);
+
+        return distDelta * minettiFactor;
+    }
+
+    /**
+     * Polinômio de Minetti et al. (2002) para cálculo do custo metabólico relativo de corrida em rampa.
+     * @param grade Inclinação da rampa em decimal (ex: 0.05 para +5% de inclinação).
+     * @return Fator multiplicador do esforço em relação ao plano (0% = 1.0).
+     */
+    public double calculateMinettiCostFactor(double grade) {
+        double g = Math.max(-0.45, Math.min(0.45, grade));
+        double cost = 155.4 * Math.pow(g, 5)
+                - 30.4 * Math.pow(g, 4)
+                - 43.3 * Math.pow(g, 3)
+                + 46.3 * Math.pow(g, 2)
+                + 19.5 * g
+                + 3.6;
+        return cost / 3.6;
+    }
 }
