@@ -616,7 +616,7 @@ public class InsightService {
         sb.append("• Use o nome do atleta e desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
         sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
         sb.append("  - Dados Climáticos: ").append(climaHeader).append("\n");
-        sb.append("  - Elevação do Treino: ").append(String.format("%.0f metros", metrics.ganhoAlt())).append(" de ganho altimétrico\n");
+        sb.append("  - Elevação x Efficiency Index: - Explique que o efficiency index já centempla a variação altimétrica conforme explicado no contexto científico (scientificContext)").append(String.format("%.3f", metrics.efficiencyIndex())).append(String.format("%.0f metros", metrics.ganhoAlt())).append(" de ganho altimétrico\n");
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" picos intervalados identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
         sb.append("• CORRELAÇÃO POSITIVA (VO2MÁX x EFIC): Explique como o VO2máx estimado de hoje (")

@@ -50,15 +50,14 @@ public class SyncScheduler {
     }
 
     @Async
-    public boolean executarSincronizacao() {
+    public void executarSincronizacao() {
         log.info("\n=== [MOTOR] Sincronização sob demanda iniciada ===");
         try {
             ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(this.accessToken, 1);
             if (response.activities().isEmpty()) {
                 log.warn("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
                 enviarLembreteUltimoInsight();
-                // Removido: encerrarAplicacaoGraciosamente()
-                return false;
+                return; // Retorno vazio
             }
 
             StravaActivity activity = response.activities().get(0);
@@ -66,29 +65,24 @@ public class SyncScheduler {
             if (activityRepository.existsById(activity.getId())) {
                 log.info("-> Treino do dia (" + activity.getName() + ") já analisado. Acionando fallback de reenvio...");
                 enviarLembreteUltimoInsight();
-                // Removido: encerrarAplicacaoGraciosamente()
-                return false;
+                return; // Retorno vazio
             }
 
             log.info("-> NOVO TREINO DETECTADO: " + activity.getName());
             processarEEnviar(this.accessToken, activity);
-
-            // Removido: encerrarAplicacaoGraciosamente()
-            return true;
+            return; // Opcional ou remova
 
         } catch (HttpClientErrorException.Unauthorized e) {
             if (renovarToken()) {
-                return executarSincronizacao();
+                executarSincronizacao(); // Chamada recursiva assíncrona
+                return;
             } else {
                 log.error("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
-                // Removido: encerrarAplicacaoGraciosamente()
-                return false;
+                return;
             }
         } catch (Exception e) {
-            // ISSO CAPTURA O "BROKEN PIPE" E IMPEDE QUE A APLICAÇÃO MORRA
             log.error("ERRO NA SINCRONIZAÇÃO: " + e.getMessage());
-            // Removido: encerrarAplicacaoGraciosamente()
-            return false;
+            return;
         }
     }
 
