@@ -128,8 +128,8 @@ public class InsightService {
         Set<DayOfWeek> diasConfigurados = parseTrainingDays(user.getTrainingDays());
         String proximoTreinoData = calcularProximaDataTreino(activityDate, diasConfigurados);
         SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed, user);
-        Optional<WorkoutPrescriptionEntity> prescricaoAnterior = workoutPrescriptionRepository.findTopByScheduledDateOrderByCreatedAtDesc(activityDate.toLocalDate());
-
+        Optional<WorkoutPrescriptionEntity> prescricaoAnterior =
+                workoutPrescriptionRepository.findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(activityDate.toLocalDate());
         // 2. Classificamos o estímulo para saber qual cenário a sessão atual pertence
         ClassificacaoResultado resultado = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
         String tipoEstimuloReal = resultado.tipoEstimulo();
@@ -528,8 +528,12 @@ public class InsightService {
         sb.append("- Nível Atual no Cenário 2 (Tiros de Quinta): NÍVEL ").append(nivelCenario2).append("\n");
         sb.append("REGRA INVIOLÁVEL: Você está ESTRITAMENTE PROIBIDA de recalcular, alterar, promover ou rebaixar o nível determinado acima.\n\n");
 
-        sb.append("--- DADOS DE PRESCRIÇÃO E DIRETRIZES DO MONGODB ---\n");
+        sb.append("--- DADOS DE PRESCRIÇÃO E DIRETRIZES DO MONGODB (MANDATÓRIO) ---\n");
         sb.append("Próximo Treino Agendado: ").append(proximoTreinoData.toUpperCase()).append("\n");
+        sb.append("📌 REGRAS DE PRESCRIÇÃO POR DIA DA SEMANA:\n")
+                .append("- TERÇA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 1 (Rodagem Leve/Desenvolvimento em Zona 2 - FATMAX).\n")
+                .append("- QUINTA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 2 (Intensificação / Tiros / VO2máx - Z3/Z4).\n")
+                .append("- SÁBADO/DOMINGO: Obrigatoriamente prescrição de CENÁRIO 1 (Longão / Rodagem de Base - Zona 2).\n\n");
         sb.append("Média Real Tiros (Quintas): ").append(String.format("%.3f", mediaEficienciaTiros)).append("\n");
         sb.append("Média Real Rodagem (Terças): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append("\n");
         sb.append("Média Real Longão (Sábados): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append("\n\n");
@@ -590,7 +594,7 @@ public class InsightService {
         sb.append("- Eficiência Média: ").append(String.format("%.3f", histEfficiencyIndex)).append(" (m/bpm*min)\n\n");
 
         if (prescricaoAnterior != null) {
-            sb.append("📋 PLANO DO TREINO:\n");
+            sb.append("📋 PLANO DO TREINO:\n").append(prescricaoAnterior.getScheduledDate()).append("\n");
             sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
             sb.append("- Duração/Volume: ").append(prescricaoAnterior.getDuration()).append("\n");
             sb.append("- Intensidade Alvo: ").append(prescricaoAnterior.getIntensity()).append("\n");
@@ -600,7 +604,13 @@ public class InsightService {
         String dataTreinoFormatada = date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
         sb.append("1.0 - 📋 CUMPRIMENTO DO PLANO PARA O TREINO DE ").append(dataTreinoFormatada).append(":\n");
         sb.append("STATUS: [CUMPRIDO | CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO]\n");
-        sb.append("[Escreva em texto corrido a justificativa técnica do cumprimento ou desvio do plano baseando-se no plano prescrito. Use o nome do atleta (").append(nomeAtletaReal).append(") no texto de forma amigável e próxima]\n\n");
+        sb.append("[Escreva em texto corrido a justificativa técnica do cumprimento ou desvio do plano baseando-se na prescrição fornecida. Use o nome do atleta (")
+                .append(nomeAtletaReal)
+                .append(") no texto de forma amigável e próxima. ");
+        sb.append("⚠️ INSTRUÇÃO SOBRE AS DATAS:\n")
+                .append("- Compare a data do 'PLANO DO TREINO' com a data em que o treino foi efetivamente realizado.\n")
+                .append("- Se as datas forem iguais, siga a análise normalmente sem necessidade de se aprofundar no agendamento.\n")
+                .append("- Se o treino foi realizado antes ou depois da data agendada, apenas comente brevemente sobre o impacto no descanso necessário e na prescrição dos próximos treinos.\n\n");
 
         sb.append("2.0 - 👨‍⚕️ DIAGNÓSTICO TÉCNICO FISIOLÓGICO");
         sb.append("[FOCO EXCLUSIVO: BIOQUÍMICA E CÉLULA]\n");
@@ -637,6 +647,10 @@ public class InsightService {
 
         sb.append("6.0 - 📅 PRESCRIÇÃO STRAFIT PREDICT:\n\n");
         sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData.toUpperCase()).append("\n\n");
+        sb.append("📌 REGRAS DE PRESCRIÇÃO POR DIA DA SEMANA:\n")
+                .append("- TERÇA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 1 (Rodagem Leve/Desenvolvimento em Zona 2 - FATMAX).\n")
+                .append("- QUINTA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 2 (Intensificação / Tiros / VO2máx - Z3/Z4).\n")
+                .append("- SÁBADO/DOMINGO: Obrigatoriamente prescrição de CENÁRIO 1 (Longão / Rodagem de Base - Zona 2).\n\n");
         sb.append("TIPO DE ESTÍMULO: [Nome do Estímulo Prescrito do MongoDB]\n\n");
         sb.append("NÍVEL ATUAL DE PROGRESSÃO: NÍVEL ").append(proximoEhSabado ? nivelCenario1 : (proximoTreinoData.toUpperCase().contains("QUINTA") || proximoTreinoData.toUpperCase().contains("THURSDAY") ? nivelCenario2 : nivelCenario1)).append(" ([Nome da Variação Selecionada no JSON, ex: N1-V4])\n\n");
         sb.append("OBJETIVO: [Objetivo técnico do treino prescrito]\n\n");
