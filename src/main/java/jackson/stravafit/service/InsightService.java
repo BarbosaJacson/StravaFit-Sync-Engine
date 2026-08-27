@@ -33,7 +33,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 
-
 @Slf4j
 @Service
 public class InsightService {
@@ -72,7 +71,8 @@ public class InsightService {
         this.openMeteoService = openMeteoService;
     }
 
-    public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {}
+    public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {
+    }
 
     @Transactional
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
@@ -121,7 +121,7 @@ public class InsightService {
         return insightDaIA;
     }
 
-    private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, StravaActivity activity,String climaHeader) {
+    private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, StravaActivity activity, String climaHeader) {
 
         // 1. Primeiro calculamos as métricas essenciais e as datas baseadas nas preferências do atleta
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
@@ -165,6 +165,21 @@ public class InsightService {
                 .filter(a -> a.getActivityId() == null || !a.getActivityId().equals(activityId))
                 .collect(Collectors.toList());
 
+        // Busca no MySQL a prescrição agendada para o próximo treino (Terça, Quinta ou Sábado)
+        LocalDate dataProximo = parseNextWorkoutDate(proximoTreinoData);
+        Optional<WorkoutPrescriptionEntity> proximaPrescricao = workoutPrescriptionRepository.findByScheduledDate(dataProximo);
+
+        // Busca o último nível gravado no MySQL pela WeeklyPlannerService para cada cenário
+        int nivelAtualCenario1 = workoutPrescriptionRepository
+                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(1)
+                .map(WorkoutPrescriptionEntity::getTargetLevel)
+                .orElse(1);
+
+        int nivelAtualCenario2 = workoutPrescriptionRepository
+                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(2)
+                .map(WorkoutPrescriptionEntity::getTargetLevel)
+                .orElse(1);
+
         // Adiciona a sessão virtual única no topo da lista correspondente
         if (ehTiro) {
             listaTiros.add(0, treinoAtualVirtual);
@@ -188,13 +203,13 @@ public class InsightService {
         double mediaEficienciaZ2Longo = calcularMediaEficienciaDaLista(listaSabados, 5);
         double mediaEficienciaTiros = calcularMediaEficienciaDaLista(listaTiros, 5);
 
-        // 8. Calculamos os níveis dinâmicos com base no histórico atualizado
-        int nivelCenario1 = calcularNivelDinamicoCenario1(listaTercas, listaSabados, proximoTreinoData);
-        int nivelCenario2 = calcularNivelDinamicoCenario2(listaTiros, mediaEficienciaTiros);
+        // 8. Busca no MySQL a prescrição agendada para a data do treino de hoje
+        LocalDate dataTreinoHoje = activityDate.toLocalDate();
+        Optional<WorkoutPrescriptionEntity> prescricaoHoje = workoutPrescriptionRepository.findByScheduledDate(dataTreinoHoje);
 
-        // 9. Mapeamos o cenário e o nível detectado de forma dinâmica para a sessão atual
+        // 9. Mapeia o cenário e o nível salvando o histórico real
         int cenarioDetectado = ehTiro ? 2 : 1;
-        int nivelDetectado = (cenarioDetectado == 2) ? nivelCenario2 : nivelCenario1;
+        int nivelDetectado = prescricaoHoje.map(WorkoutPrescriptionEntity::getTargetLevel).orElse(1);
 
         // 10. LINHA DO TEMPO CRONOLÓGICA GLOBAL
         List<ActivitySummaryEntity> historicoGlobalFiltrado = new ArrayList<>();
@@ -226,9 +241,11 @@ public class InsightService {
         String historicoPerformanceGlobal = sbHistoricoGlobal.toString();
 
         // 11. Passamos o prompt estruturado com todas as variáveis instanciadas e o 'user'
-        String prompt = buildProfessionalPrompt(user, name, metrics, activityDate, proximoTreinoData, prescricaoAnterior.orElse(null),
-                nivelCenario1, nivelCenario2, tipoEstimuloReal, janelasInstaveis,
-                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo, historicoPerformanceGlobal, climaHeader);
+        String prompt = buildProfessionalPrompt(user, name, metrics, activityDate, proximoTreinoData,
+                prescricaoAnterior.orElse(null), proximaPrescricao.orElse(null),
+                nivelAtualCenario1, nivelAtualCenario2, tipoEstimuloReal, janelasInstaveis,
+                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo,
+                historicoPerformanceGlobal, climaHeader);
 
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
@@ -265,156 +282,11 @@ public class InsightService {
             activitySummaryRepository.saveAndFlush(summary);
             log.info("[DB] Sumário de performance persistido/atualizado com sucesso para atividade: {}", activityId);
 
-            // 🎯 2. Executa a extração da prescrição em seu próprio fluxo isolado
-            self.extractAndSavePrescription(activityId, userId, rawAiResponse);
         } catch (Exception e) {
             log.error("[DB] Falha ao persistir dados técnicos para a atividade {}: {}", activityId, e.getMessage());
         }
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void extractAndSavePrescription(Long activityId, Long userId, String rawAiResponse) {
-        try {
-            String xml = extractXmlBlock(rawAiResponse);
-            if (xml == null) {
-                log.warn("[PRESCRIPTION] Bloco XML <prescription_data> não encontrado na resposta da IA para a atividade {}", activityId);
-                return;
-            }
-
-            String scheduledDateStr = extractTagValue(xml, "scheduled_date");
-            if (scheduledDateStr == null) {
-                log.error("[PRESCRIPTION] Tag <scheduled_date> não encontrada no bloco XML para a atividade {}", activityId);
-                return;
-            }
-
-            LocalDate scheduledDate = LocalDate.parse(scheduledDateStr.replaceAll("[^0-9-]", ""));
-            WorkoutPrescriptionEntity prescription = workoutPrescriptionRepository.findByActivityId(activityId).orElse(new WorkoutPrescriptionEntity());
-
-            prescription.setActivityId(activityId);
-            prescription.setScheduledDate(scheduledDate);
-            prescription.setType(extractTagValue(xml, "type"));
-            prescription.setDuration(extractTagValue(xml, "duration"));
-            prescription.setIntensity(extractTagValue(xml, "intensity"));
-            prescription.setFocus(extractTagValue(xml, "focus"));
-            prescription.setMethod(extractTagValue(xml, "method"));
-            prescription.setRawGeminiResponse(rawAiResponse);
-
-            // Busca o usuário específico dono do treino atual
-            UserEntity user = userRepository.findById(userId).orElseGet(() -> userRepository.findById(1L).orElse(new UserEntity()));
-            Set<DayOfWeek> diasDoAtleta = parseTrainingDays(user.getTrainingDays());
-
-            // Calcula dinamicamente o cenário alvo com base no dia agendado e nos dias configurados do atleta
-            int targetScenario = determinarCenarioAlvo(scheduledDate.getDayOfWeek(), diasDoAtleta);
-
-            int targetLevel;
-            if (targetScenario == 2) {
-                List<ActivitySummaryEntity> historicoTirosEntidades = activitySummaryRepository
-                        .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
-                double mediaEficienciaTiros = calcularMediaEficienciaDaLista(historicoTirosEntidades, 5);
-                targetLevel = calcularNivelDinamicoCenario2(historicoTirosEntidades, mediaEficienciaTiros);
-            } else {
-                List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
-                        .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
-
-                List<ActivitySummaryEntity> listaTercas = listaCenario1.stream()
-                        .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
-                        .toList();
-
-                List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
-                        .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
-                        .toList();
-
-                String proximoTreinoDataStr = scheduledDate.format(DateTimeFormatter.ofPattern("EEEE, dd/MM/yyyy"));
-                targetLevel = calcularNivelDinamicoCenario1(listaTercas, listaSabados, proximoTreinoDataStr);
-            }
-
-            prescription.setTargetScenario(targetScenario);
-            prescription.setTargetLevel(targetLevel);
-
-            workoutPrescriptionRepository.saveAndFlush(prescription);
-            log.info("[DB] Prescrição salva com sucesso para a data: {} | Cenário Alvo Prescrito: {}", prescription.getScheduledDate(), targetScenario);
-
-        } catch (Exception e) {
-            log.error("[PRESCRIPTION] Falha ao extrair ou salvar a prescrição: {}", e.getMessage(), e);
-        }
-    }
-
-    private int calcularNivelDinamicoCenario1(List<ActivitySummaryEntity> listaTercas, List<ActivitySummaryEntity> listaSabados, String proximoTreinoData) {
-        boolean proximoTreinoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
-
-        if (proximoTreinoEhSabado) {
-            if (listaSabados.isEmpty()) {
-                return 2;
-            }
-
-            ActivitySummaryEntity ultimoSabado = listaSabados.get(0);
-            double ultimaDistanciaKm = ultimoSabado.getDistanceKm() != null ? ultimoSabado.getDistanceKm() : 0.0;
-
-            double mediaSabados = listaSabados.stream()
-                    .limit(5)
-                    .mapToDouble(ActivitySummaryEntity::getEfficiencyIndex)
-                    .average()
-                    .orElse(0.0);
-
-            log.info("[PROGRESSÃO SÁBADO] Última distância realizada: {} km | Média de Eficiência: {}",
-                    String.format("%.2f", ultimaDistanciaKm), String.format("%.3f", mediaSabados));
-
-            if (ultimaDistanciaKm >= 11.5 && ultimaDistanciaKm < 13.5) {
-                if (mediaSabados >= 1.08 && listaSabados.size() >= 4) {
-                    log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 2 para o Nível 3 (14km). Média: {} >= 1.08", String.format("%.3f", mediaSabados));
-                    return 3;
-                }
-                log.info("[PROGRESSÃO SÁBADO] Mantido no Nível 2 (12km). Média de eficiência atual ({}) ainda não atingiu a meta de 1.08.", String.format("%.3f", mediaSabados));
-                return 2;
-            } else if (ultimaDistanciaKm >= 13.5 && ultimaDistanciaKm < 14.5) {
-                if (mediaSabados >= 1.06 && listaSabados.size() >= 4) {
-                    log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 3 para o Nível 4 (15km). Média: {} >= 1.06", String.format("%.3f", mediaSabados));
-                    return 4;
-                }
-                return 3;
-            } else if (ultimaDistanciaKm >= 14.5 && ultimaDistanciaKm < 15.5) {
-                if (mediaSabados >= 1.04 && listaSabados.size() >= 4) {
-                    log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 4 para o Nível 5 (16km). Média: {} >= 1.04", String.format("%.3f", mediaSabados));
-                    return 5;
-                }
-                return 4;
-            } else if (ultimaDistanciaKm >= 15.5) {
-                log.info("[PROGRESSÃO SÁBADO] Atleta estabilizado no teto do ciclo (Nível 5 - 16km).");
-                return 5;
-            }
-
-            return 2;
-        } else {
-            log.info("[PROGRESSÃO TERÇA] Retornando Nível 1 Fixo (Âncora de Manutenção Aeróbica).");
-            return 1;
-        }
-    }
-
-    private int calcularNivelDinamicoCenario2(List<ActivitySummaryEntity> historicoTiros, double mediaEficienciaTiros) {
-        if (historicoTiros.isEmpty() || historicoTiros.size() < 5) {
-            log.info("[PROGRESSÃO] Atleta mantido no Nível 1. Histórico insuficiente de tiros (Possui: {} de 5 necessários).", historicoTiros.size());
-            return 1;
-        }
-
-        log.info("[PROGRESSÃO] Média de Eficiência Realizada (Últimos 5 Tiros): {}", String.format("%.3f", mediaEficienciaTiros));
-
-        if (mediaEficienciaTiros >= 1.15) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido/Mantido no Nível 5 (Teto de Densidade Máxima). Média: {} >= 1.15", String.format("%.3f", mediaEficienciaTiros));
-            return 5;
-        } else if (mediaEficienciaTiros >= 1.13) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 4 (10 repetições). Média: {} >= 1.13", String.format("%.3f", mediaEficienciaTiros));
-            return 4;
-        } else if (mediaEficienciaTiros >= 1.10) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 3 (8 repetições - 1min30s). Média: {} >= 1.10", String.format("%.3f", mediaEficienciaTiros));
-            return 3;
-        } else if (mediaEficienciaTiros >= 1.06) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 2 (8 repetições - 1min00s). Média: {} >= 1.06", String.format("%.3f", mediaEficienciaTiros));
-            return 2;
-        }
-
-        log.info("[PROGRESSÃO CENÁRIO 2] Mantido no Nível 1 (6 repetições). Média: {} < 1.06", String.format("%.3f", mediaEficienciaTiros));
-        return 1;
-    }
 
     private ClassificacaoResultado classificarEstimuloFisiologico(List<StravaActivity.MinuteAnalysis> analysis, double stdDevGlobal, double fcMax, double fcMedia) {
         if (analysis == null || analysis.size() < 5) {
@@ -463,16 +335,16 @@ public class InsightService {
 
     private String buildProfessionalPrompt(UserEntity user, String name, SessionMetrics metrics, ZonedDateTime date, String proximoTreinoData,
                                            WorkoutPrescriptionEntity prescricaoAnterior,
-                                           int nivelCenario1,
-                                           int nivelCenario2,
+                                           WorkoutPrescriptionEntity proximaPrescricao,
+                                           int nivelAtualCenario1,
+                                           int nivelAtualCenario2,
                                            String tipoEstimuloReal,
                                            int picosIntervalados,
                                            double mediaEficienciaTiros,
                                            double mediaEficienciaZ2Curto,
                                            double mediaEficienciaZ2Longo,
                                            String historicoPerformanceGlobal,
-                                           String climaHeader
-                                           ) {
+                                           String climaHeader) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
         List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
@@ -494,9 +366,17 @@ public class InsightService {
         sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO, PRESCREVER A RECUPERAÇÃO E GERAR O PRÓXIMO TREINO.\n\n");
 
         sb.append("🚨 REGRA MANDATÓRIA DE LINGUAGEM E TOM DE VOZ:\n");
-        sb.append("- FALE DIRETAMENTE COM O ATLETA (").append(nomeAtletaReal.toUpperCase()).append(") EM PRIMEIRA PESSOA DO SINGULAR ('Eu analisei', 'Eu observei', 'Identifiquei').\n");
-        sb.append("- TRATE O ATLETA DIRETAMENTE POR 'VOCÊ' OU PELO NOME DE FORMA AMIGÁVEL DE UM TREINADOR QUE TEM AMIZADE COM O ATLETA ('").append(nomeAtletaReal).append("').\n");
-        sb.append("- É ESTRITAMENTE PROIBIDO FALAR EM TERCEIRA PESSOA (NÃO USE 'O atleta cumpriu', 'O corredor executou', 'fulano realizou'). Use sempre 'Você cumpriu', 'Você executou'.\n\n");
+        sb.append("--- TOM DE VOZ E ESTILO DE COMUNICAÇÃO ---\n");
+        sb.append("- PERSONA: Você é um treinador de corrida parceiro, amigável e especialista em fisiologia. O tom deve ser leve, motivador, humano e descontraído (como uma conversa no WhatsApp pós-treino).\n");
+        sb.append("- TRATAMENTO: Fale diretamente com o atleta (").append(nomeAtletaReal).append(") usando 'você'. Use apenas o PRIMEIRO NOME de forma amigável (ex: 'Fala, ").append(nomeAtletaReal).append("!', 'Show de bola, ").append(nomeAtletaReal).append("'). NUNCA use o nome completo em todas as frases.\n");
+        sb.append("- LINGUAGEM NATURAL: Seja fluido e variado. É PROIBIDO iniciar várias frases seguidas com 'Eu' (ex: PROIBIDO usar 'Eu observei...', 'Eu vejo...', 'Eu classifiquei...').\n");
+        sb.append("- PROIBIDO TERCEIRA PESSOA: Nunca fale 'o atleta', 'o corredor' ou 'ele'. Fale direto com ELE de forma pessoal.\n\n");
+
+        sb.append("--- EXEMPLOS DE LINGUAGEM ESPERADA ---\n");
+
+        sb.append("✅ JEITO CERTO (Natural, parceiro e descontraído):\n");
+        sb.append("  'Fala, ").append(nomeAtletaReal).append("! Beleza? Cara, que treino sensacional você entregou hoje! Fechar os 10.1 km cravando 95% do tempo na Zona 2 mostra um controle de ritmo absurdo.\n");
+        sb.append("  Seu Efficiency Index bateu 1.117, o que é uma marca excelente. Na prática, seu corpo tá ficando cada vez mais eficiente em queimar gordura como combustível (massa demais pra preparação da Meia Maratona!). O coração trabalhou super estável, mesmo com essa garoa e umidade alta...'\n\n");
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
         sb.append("--- CONDIÇÕES CLIMÁTICAS NO MOMENTO DO TREINO ---\n");
@@ -523,9 +403,9 @@ public class InsightService {
         sb.append("DURACAO: ").append(metrics.duracao()).append(" min | FC Méd: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm | FC Max: ").append(String.format("%.0f", metrics.fcMax())).append(" bpm | Zona Pred: Z").append(metrics.zonaPredominante()).append(" | Efic: ").append(String.format("%.3f", metrics.efficiencyIndex())).append(" | VO2: ").append(String.format("%.1f", metrics.vo2MaxEstimado())).append("\n");
         sb.append("DESVIO PADRÃO DA FC: ").append(String.format("%.1f", metrics.stdDev())).append(" bpm | COMPORTAMENTO CARDÍACO: ").append(metrics.comportamento()).append("\n\n");
 
-        sb.append("--- NÍVEIS DE PROGRESSÃO ATUAIS DO ATLETA (CÁLCULO MATEMÁTICO MANDATÓRIO) ---\n");
-        sb.append("- Nível Atual no Cenário 1 (Rodagens/Longão): NÍVEL ").append(nivelCenario1).append("\n");
-        sb.append("- Nível Atual no Cenário 2 (Tiros de Quinta): NÍVEL ").append(nivelCenario2).append("\n");
+        sb.append("--- NÍVEIS DE PROGRESSÃO ATUAIS DO ATLETA (DEFINIDOS NO PLANEJAMENTO SEMANAL) ---\n");
+        sb.append("- Nível Atual no Cenário 1 (Rodagens/Longão): NÍVEL ").append(nivelAtualCenario1).append("\n");
+        sb.append("- Nível Atual no Cenário 2 (Tiros de Quinta): NÍVEL ").append(nivelAtualCenario2).append("\n");
         sb.append("REGRA INVIOLÁVEL: Você está ESTRITAMENTE PROIBIDA de recalcular, alterar, promover ou rebaixar o nível determinado acima.\n\n");
 
         sb.append("--- DADOS DE PRESCRIÇÃO E DIRETRIZES DO MONGODB (MANDATÓRIO) ---\n");
@@ -582,9 +462,9 @@ public class InsightService {
         sb.append("\n\n");
 
         sb.append("📈 MÉDIAS DE EFICIÊNCIA ACUMULADAS (5 treinos):\n");
-        sb.append("• Rodagem Curta (Terça): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" | Nível ").append(nivelCenario1).append("\n");
-        sb.append("• Tiros / VO2máx (Quinta): ").append(String.format("%.3f", mediaEficienciaTiros)).append(" | Nível ").append(nivelCenario2).append("\n");
-        sb.append("• Longão (Sábado): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" | Nível ").append(nivelCenario1).append("\n\n");
+        sb.append("• Rodagem Curta (Terça): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" | Nível ").append(nivelAtualCenario1).append("\n");
+        sb.append("• Tiros / VO2máx (Quinta): ").append(String.format("%.3f", mediaEficienciaTiros)).append(" | Nível ").append(nivelAtualCenario2).append("\n");
+        sb.append("• Longão (Sábado): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" | Nível ").append(nivelAtualCenario1).append("\n");
 
         sb.append("📊 HISTÓRICO MÉDIO (10 treinos):\n");
         sb.append("- VO2 Máx Médio: ").append(String.format("%.1f", histVo2Medio)).append(" ml/kg/min\n");
@@ -626,7 +506,12 @@ public class InsightService {
         sb.append("• Use o nome do atleta e desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
         sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
         sb.append("  - Dados Climáticos: ").append(climaHeader).append("\n");
-        sb.append("  - Elevação x Efficiency Index: - Explique que o efficiency index já centempla a variação altimétrica conforme explicado no contexto científico (scientificContext)").append(String.format("%.3f", metrics.efficiencyIndex())).append(String.format("%.0f metros", metrics.ganhoAlt())).append(" de ganho altimétrico\n");
+        // Substituir a linha da elevação por:
+        sb.append("  - Elevação x Efficiency Index: O Efficiency Index (")
+                .append(String.format("%.3f", metrics.efficiencyIndex()))
+                .append(") já contempla a variação de ")
+                .append(String.format("%.0f", metrics.ganhoAlt()))
+                .append(" metros de ganho altimétrico\n");
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" picos intervalados identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
         sb.append("• CORRELAÇÃO POSITIVA (VO2MÁX x EFIC): Explique como o VO2máx estimado de hoje (")
@@ -637,30 +522,35 @@ public class InsightService {
 
         sb.append("• É ESTRITAMENTE PROIBIDO repetir explicações sobre PGC-1alpha, mitocôndrias ou autores já citados na Seção 2.0.\n\n");
         sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO \n");
-        sb.append("• Escreva em texto corrido um parecer técnico e motivacional, use o nome do atleta de forma informal comparando o rendimento de HOJE com o histórico recente lido na orientação inicial (mencionando a assimilação de carga, controle de fadiga e a interação entre Z2 e Tiros).\n");
-        sb.append("• É ESTRITAMENTE PROIBIDO escrever teorias longas sobre depleção de glicogênio ou comparações genéricas de dias da semana (foco na relação VO2 x Eficiência de hoje vs histórico).\n");
-        sb.append("• NÃO IMPRIMA listas de treinos anteriores nesta seção.\n\n");
-        sb.append("• Encerre com uma mensagem encorajadora e crie conexão amigável com o atleta rumo à Meia Maratona de 31/10/2026.\n\n");
+        sb.append("- OBJETIVO DA SEÇÃO: Fazer um fechamento leve, sucinto e 100% focado no progresso prático para a Meia Maratona. É ESTRITAMENTE PROIBIDO repetir números, médias históricas ou teorias fisiológicas já explicadas nas seções 2.0 e 3.0.\n");
+        sb.append("- LINGUAGEM: Use linguagem simples, descontraída e motivadora (como uma conversa direta de treinador para atleta).\n");
+        sb.append("- REGRAS DINÂMICAS DE CONTEÚDO:\n");
+        sb.append("  • Diga em poucas palavras o que o treino executado HOJE agrega na prática.\n");
+        sb.append("  • Adapte a conexão com o próximo treino de acordo com o calendário real (ex: se hoje foi Terça, mencione o preparo para Quinta; se hoje foi Quinta, mencione o descanso/preparo para o Fim de Semana; se foi Fim de Semana, mencione a recuperação para a próxima Terça).\n");
+        sb.append("  • Finalize com uma mensagem curta e empolgante focada na Meia Maratona de 31/10/2026.\n\n");
+
+        sb.append("--- ESTRUTURA DO EXEMPLO DE CONCLUSÃO (ADAPTE AO DIA E TREINO REAL) ---\n");
+        sb.append("✅ '4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO\n");
+        sb.append("  [Primeiro Nome], o treino de hoje [Tipo do Treino de Hoje] cumpriu perfeitamente o papel de [Benefício Prático em linguagem simples]. É essa consistência que garante o corpo pronto para [Conexão com o Próximo Treino Prescrito]!\n");
+        sb.append("  Você tá construindo um ritmo de prova cada vez mais sólido. Mantém o foco e a disciplina que a Meia Maratona de 31/10 tá logo ali e você vai chegar voando! Tamo junto nessa! 🚀'\n\n");
 
         sb.append("5.0 - 🍽️ NUTRIÇÃO / DESCANSO 💤\n");
         sb.append("[Prescreva a estratégia detalhada de alimentação pré/pós treino e janelas de repouso conforme as diretrizes do MongoDB para o tipo de treino realizado HOJE. Se foi Z2 use 'light_moderated_days', se foi Tiros use 'high_intensity_days']\n\n");
 
         sb.append("6.0 - 📅 PRESCRIÇÃO STRAFIT PREDICT:\n\n");
         sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData.toUpperCase()).append("\n\n");
-        sb.append("📌 REGRAS DE PRESCRIÇÃO POR DIA DA SEMANA:\n")
-                .append("- TERÇA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 1 (Rodagem Leve/Desenvolvimento em Zona 2 - FATMAX).\n")
-                .append("- QUINTA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 2 (Intensificação / Tiros / VO2máx - Z3/Z4).\n")
-                .append("- SÁBADO/DOMINGO: Obrigatoriamente prescrição de CENÁRIO 1 (Longão / Rodagem de Base - Zona 2).\n\n");
-        sb.append("TIPO DE ESTÍMULO: [Nome do Estímulo Prescrito do MongoDB]\n\n");
-        sb.append("NÍVEL ATUAL DE PROGRESSÃO: NÍVEL ").append(proximoEhSabado ? nivelCenario1 : (proximoTreinoData.toUpperCase().contains("QUINTA") || proximoTreinoData.toUpperCase().contains("THURSDAY") ? nivelCenario2 : nivelCenario1)).append(" ([Nome da Variação Selecionada no JSON, ex: N1-V4])\n\n");
-        sb.append("OBJETIVO: [Objetivo técnico do treino prescrito]\n\n");
-        sb.append("ESTRUTURA DO TREINO ([Cenário X], Nível [Y] - Variação [Vx]):\n");
-        sb.append("VOLUME: [Volume em km definido na variação no JSON]\n");
-        sb.append("DURAÇÃO ALVO: Entre [X] e [Y] minutos\n");
-        sb.append("INTENSIDADE: [Faixa de Zonas de FC e BPM do JSON]\n");
-        sb.append("MÉTODO: [Descreva a execução contínua ou ritos de tiros/pausas]\n\n");
-        sb.append("JUSTIFICATIVA TÉCNICA DA VARIAÇÃO ([Código da Variação]):\n");
-        sb.append("[Explique o motivo exato da escolha da Variação com base no Efficiency Index Médio do atleta no dia correspondente]\n\n");
+
+        if (proximaPrescricao != null) {
+            sb.append("TIPO DE ESTÍMULO: ").append(proximaPrescricao.getType()).append("\n\n");
+            sb.append("NÍVEL ATUAL DE PROGRESSÃO: NÍVEL ").append(proximaPrescricao.getTargetLevel()).append("\n\n");
+            sb.append("OBJETIVO: ").append(proximaPrescricao.getFocus()).append("\n\n");
+            sb.append("ESTRUTURA DO TREINO:\n");
+            sb.append("DURAÇÃO/VOLUME: ").append(proximaPrescricao.getDuration()).append("\n");
+            sb.append("INTENSIDADE: ").append(proximaPrescricao.getIntensity()).append("\n");
+            sb.append("MÉTODO: ").append(proximaPrescricao.getMethod()).append("\n\n");
+        } else {
+            sb.append("A prescrição para o próximo treino será atualizada pelo planejamento semanal na próxima segunda-feira.\n\n");
+        }
 
         sb.append("--- INSTRUÇÃO TÉCNICA DO SISTEMA ---\n");
         sb.append("Ao final do relatório, adicione OBRIGATORIAMENTE o bloco XML abaixo UMA ÚNICA VEZ:\n");
@@ -676,7 +566,11 @@ public class InsightService {
         return sb.toString();
     }
 
-    public record SessionMetrics(double fcMedia, double fcMax, int duracao, double stdDev, int zonaPredominante, double z2Percent, String comportamento, double fcMaxPercentage, double vo2MaxEstimado, double ganhoAlt, double efficiencyIndex, double safeDistance, String paceFormatted, Map<Integer, Double> zonePercentages) {}
+    public record SessionMetrics(double fcMedia, double fcMax, int duracao, double stdDev, int zonaPredominante,
+                                 double z2Percent, String comportamento, double fcMaxPercentage, double vo2MaxEstimado,
+                                 double ganhoAlt, double efficiencyIndex, double safeDistance, String paceFormatted,
+                                 Map<Integer, Double> zonePercentages) {
+    }
 
     private SessionMetrics calcularMetricasSessao(List<StravaActivity.MinuteAnalysis> analysis, Double distance, Double averageSpeed, UserEntity user) {
 

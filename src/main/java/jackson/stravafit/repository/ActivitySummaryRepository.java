@@ -5,6 +5,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,5 +22,8 @@ public interface ActivitySummaryRepository extends JpaRepository<ActivitySummary
 
     // 🎯 Consulta que traz os últimos 10 treinos de um cenário específico, independente do nível
     List<ActivitySummaryEntity> findTop10ByDetectedScenarioOrderByStartDateDesc(Integer detectedScenario);
+
+    // Busca os sumários de treino realizados em um intervalo de datas (ex: Segunda a Domingo da semana passada)
+    List<ActivitySummaryEntity> findByStartDateBetweenOrderByStartDateAsc(LocalDateTime start, LocalDateTime end);
 
 }

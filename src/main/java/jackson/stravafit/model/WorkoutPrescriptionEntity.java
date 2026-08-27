@@ -20,7 +20,7 @@ public class WorkoutPrescriptionEntity {
     private Long id;
 
     // ID da atividade Strava para a qual esta prescrição foi gerada (após a análise desta atividade)
-    @Column(name = "activity_id", nullable = false)
+    @Column(name = "activity_id", nullable = true)
     private Long activityId;
 
     // Data para a qual o treino foi prescrito (ex: QUINTA-FEIRA, 30/04/2026)

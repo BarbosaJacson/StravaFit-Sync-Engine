@@ -21,4 +21,9 @@ public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPres
     
     // Adicionado para a lógica de UPSERT no InsightService
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
+
+    // ✨ MÉTODO ADICIONADO PARA O PLANEJAMENTO SEMANAL (Upsert por Data):
+    Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
+    // Busca a prescrição mais recente de um cenário específico (ex: Cenário 1 ou Cenário 2)
+    Optional<WorkoutPrescriptionEntity> findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Integer targetScenario);
 }
