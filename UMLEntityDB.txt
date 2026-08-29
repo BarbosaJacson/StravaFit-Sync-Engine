@@ -1,0 +1,105 @@
+@startuml StravaFit_Domain_Model
+
+package "Model Layer - JPA / MySQL" {
+    
+    enum Gender {
+        MALE
+        FEMALE
+    }
+
+    class UserEntity {
+        - Long id
+        - String googleId
+        - Long stravaAthleteId
+        - String name
+        - LocalDate birthDate
+        - Gender gender
+        - Integer hrMax
+        - Integer hrResting
+        - String email
+        - Integer weeklyFrequency
+        - String trainingDays
+        - String targetObjective
+        - LocalDateTime createdAt
+        - Long telegramChatId
+    }
+
+    class ActivityEntity {
+        - Long id
+        - String name
+        - String startDate
+        - Double distanceKm
+        - Double averageHeartRate
+        - Double maxHeartRate
+        - String sportType
+        - String dominantZone
+        - Integer totalTimeMinutes
+        - String geminiInsight
+    }
+
+    class MinuteAnalysisEntity {
+        - Long id
+        - Integer minute
+        - Double averageHeartRate
+        - Double maxHeartRate
+        - Integer zone
+        - Double averageElevation
+        - Double averageCadence
+    }
+
+    class ActivitySummaryEntity {
+        - Long activityId
+        - LocalDateTime startDate
+        - Double distanceKm
+        - Integer totalTimeMinutes
+        - Double averageHeartRate
+        - Integer maxHeartRate
+        - Integer dominantZone
+        - Double efficiencyIndex
+        - String aiAnalysisSummary
+        - String realStimulusType
+        - Integer detectedScenario
+        - Integer detectedLevel
+    }
+
+    class WorkoutPrescriptionEntity {
+        - Long id
+        - Long activityId
+        - LocalDate scheduledDate
+        - String type
+        - Double distanceKm
+        - String duration
+        - String intensity
+        - String focus
+        - String method
+        - Integer targetScenario
+        - Integer targetLevel
+        - LocalDateTime createdAt
+    }
+
+    class UserEventEntity {
+        - Long id
+        - String eventName
+        - LocalDate eventDate
+        - Double targetDistanceKm
+        - boolean isMainEvent
+    }
+
+    UserEntity "1" *-- "0..*" UserEventEntity : participates in
+    UserEntity "1" --> "1" Gender : defined by
+    ActivityEntity "1" *-- "0..*" MinuteAnalysisEntity : composes minuteDetails
+}
+
+package "Model Layer - MongoDB" {
+    class ScenarioEntity {
+        - String id
+        - String titulo
+        - String diagnostico
+        - String analise
+        - String conclusao
+        - String reposicao
+        - String proximoTreino
+    }
+}
+
+@enduml

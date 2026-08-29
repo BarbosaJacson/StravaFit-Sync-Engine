@@ -261,7 +261,6 @@ public class InsightService {
                                        String cleanResult, String rawAiResponse,
                                        String tipoEstimuloReal, int cenarioDetectado, int nivelDetectado) {
         try {
-            // 🎯 1. Busca por activityId diretamente para garantir que faremos UPDATE e não INSERT duplicado
             ActivitySummaryEntity summary = activitySummaryRepository.findByActivityId(activityId)
                     .orElseGet(() -> activitySummaryRepository.findById(activityId)
                             .orElse(new ActivitySummaryEntity()));
@@ -282,11 +281,12 @@ public class InsightService {
             activitySummaryRepository.saveAndFlush(summary);
             log.info("[DB] Sumário de performance persistido/atualizado com sucesso para atividade: {}", activityId);
 
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.warn("[DB] Concorrência detectada: Atividade {} já foi gravada por outra thread.", activityId);
         } catch (Exception e) {
             log.error("[DB] Falha ao persistir dados técnicos para a atividade {}: {}", activityId, e.getMessage());
         }
     }
-
 
     private ClassificacaoResultado classificarEstimuloFisiologico(List<StravaActivity.MinuteAnalysis> analysis, double stdDevGlobal, double fcMax, double fcMedia) {
         if (analysis == null || analysis.size() < 5) {

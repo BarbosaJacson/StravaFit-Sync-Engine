@@ -59,7 +59,6 @@ public class ActivityService {
                 .map(m -> new MinuteAnalysisEntity(null, m.getMinute(), m.getAverageHeartRate(), m.getMaxHeartRate(), m.getZone(), m.getAverageElevation(), m.getAverageCadence()))
                 .toList();
 
-        // Lógica de "Upsert": Tenta buscar a atividade existente para atualizar, ou cria uma nova se não existir.
         ActivityEntity entity = activityRepository.findById(activity.getId())
                 .map(existing -> {
                     log.info("[DB] Atividade {} já existe. Atualizando dados...", activity.getId());
@@ -73,7 +72,6 @@ public class ActivityService {
                     existing.setTotalTimeMinutes((int) (activity.getElapsedTime() / 60.0));
                     existing.setGeminiInsight(insight);
 
-                    // Limpa e atualiza a análise minuto a minuto
                     existing.getMinuteDetails().clear();
                     existing.getMinuteDetails().addAll(minuteEntities);
 
@@ -96,10 +94,13 @@ public class ActivityService {
                     );
                 });
 
-        // O método save do JPA lida com INSERT e UPDATE automaticamente.
-        // Esta única chamada resolve o problema de duplicidade e o erro de compilação.
-        activityRepository.save(entity);
-        log.info("[DB] Atividade {} salva/atualizada com sucesso no banco.", entity.getId());
+        try {
+            // 🎯 Força o envio imediato do SQL para o MySQL tratando concorrência
+            activityRepository.saveAndFlush(entity);
+            log.info("[DB] Atividade {} salva/atualizada com sucesso no banco.", entity.getId());
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.warn("[DB] Concorrência detectada: Atividade {} já foi gravada por outra thread.", activity.getId());
+        }
     }
     /**
      * Transforma dados de segundos em médias por minuto e identifica a zona cardíaca com base nos dados biométricos do atleta (MySQL).

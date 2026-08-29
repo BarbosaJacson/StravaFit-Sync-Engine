@@ -1,0 +1,28 @@
+@startuml StravaFit_Sequence_Diagram
+
+actor Atleta
+participant StravaWebhookController as Webhook
+participant SyncScheduler as Engine
+participant StravaClient as Strava
+participant ActivityService as ActService
+participant OpenMeteoService as Weather
+participant KnowledgeService as Mongo
+participant GeminiClient as Gemini
+participant TelegramClient as Telegram
+
+Atleta -> Webhook : Salva atividade no Strava
+Webhook -> Engine : executarSincronizacao()
+Engine -> Strava : getActivities() / getStreams()
+Strava --> Engine : Dados do treino (HeartRate, Cadence, Distance)
+Engine -> ActService : aggregateStreamsByMinute() (Minetti/Karvonen)
+ActService --> Engine : Lista de Minutos Calculados
+Engine -> Weather : getWeatherForLocation(GPS, Date)
+Weather --> Engine : Clima Histórico (Temp, Umidade)
+Engine -> Mongo : getScientificContext(Gender)
+Mongo --> Engine : JSONs Científicos da Base
+Engine -> Gemini : getInsight(Prompt com Fisiologia)
+Gemini --> Engine : Parecer Técnico da IA
+Engine -> Telegram : sendMessage(Relatório Sanitizado)
+Telegram --> Atleta : Notificação no Telegram
+
+@enduml

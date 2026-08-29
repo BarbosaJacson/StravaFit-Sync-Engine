@@ -1,0 +1,60 @@
+@startuml StravaFit_Services_Architecture
+
+package "Controllers / REST API" {
+    class DebugController
+    class SyncController
+    class StravaWebhookController
+}
+
+package "Services / Business Logic" {
+    class SyncScheduler
+    class InsightService
+    class WeeklyPlannerService
+    class ActivityService
+    class KnowledgeService
+    class OpenMeteoService
+    class StravaAuthService
+}
+
+package "External Integration Clients" {
+    class GeminiClient
+    class StravaClient
+    class TelegramClient
+}
+
+package "Repositories / Persistence" {
+    interface ActivityRepository
+    interface ActivitySummaryRepository
+    interface WorkoutPrescriptionRepository
+    interface UserRepository
+    interface ScenarioRepository
+}
+
+' Relacionamentos e Injeções
+DebugController --> SyncScheduler
+DebugController --> WeeklyPlannerService
+SyncController --> SyncScheduler
+StravaWebhookController --> SyncScheduler
+
+SyncScheduler --> ActivityService
+SyncScheduler --> InsightService
+SyncScheduler --> TelegramClient
+SyncScheduler --> StravaAuthService
+
+WeeklyPlannerService --> GeminiClient
+WeeklyPlannerService --> KnowledgeService
+WeeklyPlannerService --> TelegramClient
+WeeklyPlannerService --> ActivitySummaryRepository
+WeeklyPlannerService --> WorkoutPrescriptionRepository
+
+InsightService --> GeminiClient
+InsightService --> KnowledgeService
+InsightService --> OpenMeteoService
+InsightService --> ActivityService
+InsightService --> ActivityRepository
+InsightService --> ActivitySummaryRepository
+
+ActivityService --> StravaClient
+ActivityService --> ActivityRepository
+
+@enduml

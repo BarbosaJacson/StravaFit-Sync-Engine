@@ -1662,7 +1662,7 @@ public class WorkoutPrescriptionEntity {
     private Long id;
 
     // ID da atividade Strava para a qual esta prescrição foi gerada (após a análise desta atividade)
-    @Column(name = "activity_id", nullable = false)
+    @Column(name = "activity_id", nullable = true)
     private Long activityId;
 
     // Data para a qual o treino foi prescrito (ex: QUINTA-FEIRA, 30/04/2026)
@@ -1949,7 +1949,6 @@ public class ActivityService {
                 .map(m -> new MinuteAnalysisEntity(null, m.getMinute(), m.getAverageHeartRate(), m.getMaxHeartRate(), m.getZone(), m.getAverageElevation(), m.getAverageCadence()))
                 .toList();
 
-        // Lógica de "Upsert": Tenta buscar a atividade existente para atualizar, ou cria uma nova se não existir.
         ActivityEntity entity = activityRepository.findById(activity.getId())
                 .map(existing -> {
                     log.info("[DB] Atividade {} já existe. Atualizando dados...", activity.getId());
@@ -1963,7 +1962,6 @@ public class ActivityService {
                     existing.setTotalTimeMinutes((int) (activity.getElapsedTime() / 60.0));
                     existing.setGeminiInsight(insight);
 
-                    // Limpa e atualiza a análise minuto a minuto
                     existing.getMinuteDetails().clear();
                     existing.getMinuteDetails().addAll(minuteEntities);
 
@@ -1986,10 +1984,13 @@ public class ActivityService {
                     );
                 });
 
-        // O método save do JPA lida com INSERT e UPDATE automaticamente.
-        // Esta única chamada resolve o problema de duplicidade e o erro de compilação.
-        activityRepository.save(entity);
-        log.info("[DB] Atividade {} salva/atualizada com sucesso no banco.", entity.getId());
+        try {
+            // 🎯 Força o envio imediato do SQL para o MySQL tratando concorrência
+            activityRepository.saveAndFlush(entity);
+            log.info("[DB] Atividade {} salva/atualizada com sucesso no banco.", entity.getId());
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.warn("[DB] Concorrência detectada: Atividade {} já foi gravada por outra thread.", activity.getId());
+        }
     }
     /**
      * Transforma dados de segundos em médias por minuto e identifica a zona cardíaca com base nos dados biométricos do atleta (MySQL).
@@ -2434,7 +2435,6 @@ public class InsightService {
                                        String cleanResult, String rawAiResponse,
                                        String tipoEstimuloReal, int cenarioDetectado, int nivelDetectado) {
         try {
-            // 🎯 1. Busca por activityId diretamente para garantir que faremos UPDATE e não INSERT duplicado
             ActivitySummaryEntity summary = activitySummaryRepository.findByActivityId(activityId)
                     .orElseGet(() -> activitySummaryRepository.findById(activityId)
                             .orElse(new ActivitySummaryEntity()));
@@ -2455,11 +2455,12 @@ public class InsightService {
             activitySummaryRepository.saveAndFlush(summary);
             log.info("[DB] Sumário de performance persistido/atualizado com sucesso para atividade: {}", activityId);
 
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.warn("[DB] Concorrência detectada: Atividade {} já foi gravada por outra thread.", activityId);
         } catch (Exception e) {
             log.error("[DB] Falha ao persistir dados técnicos para a atividade {}: {}", activityId, e.getMessage());
         }
     }
-
 
     private ClassificacaoResultado classificarEstimuloFisiologico(List<StravaActivity.MinuteAnalysis> analysis, double stdDevGlobal, double fcMax, double fcMedia) {
         if (analysis == null || analysis.size() < 5) {
@@ -2679,7 +2680,12 @@ public class InsightService {
         sb.append("• Use o nome do atleta e desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
         sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
         sb.append("  - Dados Climáticos: ").append(climaHeader).append("\n");
-        sb.append("  - Elevação x Efficiency Index: - Explique que o efficiency index já centempla a variação altimétrica conforme explicado no contexto científico (scientificContext)").append(String.format("%.3f", metrics.efficiencyIndex())).append(String.format("%.0f metros", metrics.ganhoAlt())).append(" de ganho altimétrico\n");
+        // Substituir a linha da elevação por:
+        sb.append("  - Elevação x Efficiency Index: O Efficiency Index (")
+                .append(String.format("%.3f", metrics.efficiencyIndex()))
+                .append(") já contempla a variação de ")
+                .append(String.format("%.0f", metrics.ganhoAlt()))
+                .append(" metros de ganho altimétrico\n");
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" picos intervalados identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
         sb.append("• CORRELAÇÃO POSITIVA (VO2MÁX x EFIC): Explique como o VO2máx estimado de hoje (")
@@ -3365,35 +3371,24 @@ public class WeeklyPlannerService {
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
 
-    /**
-     * Método principal chamado pela rotina de Segunda-Feira às 08:00
-     */
     @Scheduled(cron = "0 0 8 * * MON", zone = "America/Sao_Paulo")
     @Transactional
     public void gerenciarPlanejamentoSemanal() {
         log.info("[WEEKLY PLANNER] Iniciando geração do plano de treino para a semana...");
 
-        // 1. Busca o atleta principal
         UserEntity user = userRepository.findById(1L)
                 .orElseThrow(() -> new IllegalStateException("Atleta principal não cadastrado."));
 
-        // 2. Busca o histórico de treinos executados na semana passada
         List<ActivitySummaryEntity> treinosAnteriores = buscarTreinosSemanaAnterior();
 
-        // 3. Solicita as 3 prescrições ao Gemini
         String respostaIA = gerarPrescricaoSemanalIA(user, treinosAnteriores);
 
-        // 4. Salva no banco e notifica no Telegram
         processarESalvarPrescricoes(respostaIA, user);
     }
 
-    /**
-     * Busca os treinos executados na semana anterior (Segunda a Domingo)
-     */
     public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior() {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
-        // Define o intervalo da semana passada (Segunda-feira 00:00 até Domingo 23:59)
         LocalDateTime inicioSemanaAnterior = hoje.minusWeeks(1).with(DayOfWeek.MONDAY).atStartOfDay();
         LocalDateTime fimSemanaAnterior = hoje.minusWeeks(1).with(DayOfWeek.SUNDAY).atTime(23, 59, 59);
 
@@ -3402,9 +3397,6 @@ public class WeeklyPlannerService {
         return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemanaAnterior, fimSemanaAnterior);
     }
 
-    /**
-     * Calcula o nível dinâmico para o Cenário 1 (Rodagens / Longão)
-     */
     private int calcularNivelDinamicoCenario1(List<ActivitySummaryEntity> listaTercas, List<ActivitySummaryEntity> listaSabados, String proximoTreinoData) {
         boolean proximoTreinoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
 
@@ -3422,81 +3414,56 @@ public class WeeklyPlannerService {
                     .average()
                     .orElse(0.0);
 
-            log.info("[PROGRESSÃO SÁBADO] Última distância realizada: {} km | Média de Eficiência: {}",
-                    String.format("%.2f", ultimaDistanciaKm), String.format("%.3f", mediaSabados));
-
             if (ultimaDistanciaKm >= 11.5 && ultimaDistanciaKm < 13.5) {
                 if (mediaSabados >= 1.08 && listaSabados.size() >= 4) {
-                    log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 2 para o Nível 3 (14km). Média: {} >= 1.08", String.format("%.3f", mediaSabados));
                     return 3;
                 }
-                log.info("[PROGRESSÃO SÁBADO] Mantido no Nível 2 (12km). Média de eficiência atual ({}) ainda não atingiu a meta de 1.08.", String.format("%.3f", mediaSabados));
                 return 2;
             } else if (ultimaDistanciaKm >= 13.5 && ultimaDistanciaKm < 14.5) {
                 if (mediaSabados >= 1.06 && listaSabados.size() >= 4) {
-                    log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 3 para o Nível 4 (15km). Média: {} >= 1.06", String.format("%.3f", mediaSabados));
                     return 4;
                 }
                 return 3;
             } else if (ultimaDistanciaKm >= 14.5 && ultimaDistanciaKm < 15.5) {
                 if (mediaSabados >= 1.04 && listaSabados.size() >= 4) {
-                    log.info("[PROGRESSÃO SÁBADO] Promovido do Nível 4 para o Nível 5 (16km). Média: {} >= 1.04", String.format("%.3f", mediaSabados));
                     return 5;
                 }
                 return 4;
             } else if (ultimaDistanciaKm >= 15.5) {
-                log.info("[PROGRESSÃO SÁBADO] Atleta estabilizado no teto do ciclo (Nível 5 - 16km).");
                 return 5;
             }
 
             return 2;
         } else {
-            log.info("[PROGRESSÃO TERÇA] Retornando Nível 1 Fixo (Âncora de Manutenção Aeróbica).");
             return 1;
         }
     }
 
-    /**
-     * Calcula o nível dinâmico para o Cenário 2 (Tiros / Intensidade)
-     */
     private int calcularNivelDinamicoCenario2(List<ActivitySummaryEntity> historicoTiros, double mediaEficienciaTiros) {
         if (historicoTiros.isEmpty() || historicoTiros.size() < 5) {
-            log.info("[PROGRESSÃO] Atleta mantido no Nível 1. Histórico insuficiente de tiros (Possui: {} de 5 necessários).", historicoTiros.size());
             return 1;
         }
 
-        log.info("[PROGRESSÃO] Média de Eficiência Realizada (Últimos 5 Tiros): {}", String.format("%.3f", mediaEficienciaTiros));
-
         if (mediaEficienciaTiros >= 1.15) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido/Mantido no Nível 5 (Teto de Densidade Máxima). Média: {} >= 1.15", String.format("%.3f", mediaEficienciaTiros));
             return 5;
         } else if (mediaEficienciaTiros >= 1.13) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 4 (10 repetições). Média: {} >= 1.13", String.format("%.3f", mediaEficienciaTiros));
             return 4;
         } else if (mediaEficienciaTiros >= 1.10) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 3 (8 repetições - 1min30s). Média: {} >= 1.10", String.format("%.3f", mediaEficienciaTiros));
             return 3;
         } else if (mediaEficienciaTiros >= 1.06) {
-            log.info("[PROGRESSÃO CENÁRIO 2] Promovido para o Nível 2 (8 repetições - 1min00s). Média: {} >= 1.06", String.format("%.3f", mediaEficienciaTiros));
             return 2;
         }
 
-        log.info("[PROGRESSÃO CENÁRIO 2] Mantido no Nível 1 (6 repetições). Média: {} < 1.06", String.format("%.3f", mediaEficienciaTiros));
         return 1;
     }
 
-    /**
-     * Monta o prompt e solicita ao Gemini a geração dos 3 treinos da semana atual com níveis calculados matematicamente.
-     */
     public String gerarPrescricaoSemanalIA(UserEntity user, List<ActivitySummaryEntity> treinosAnteriores) {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
-        // Mapeia os dias de treino da semana atual
         LocalDate terca = hoje.with(DayOfWeek.TUESDAY);
         LocalDate quinta = hoje.with(DayOfWeek.THURSDAY);
         LocalDate sabado = hoje.with(DayOfWeek.SATURDAY);
 
-        // 1. Busca histórico recente de cenários do MySQL para cálculo de progressão
         List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
         List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
@@ -3510,31 +3477,31 @@ public class WeeklyPlannerService {
                 .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
                 .toList();
 
-        // 2. Calcula médias de eficiência
         double mediaEficienciaTiros = listaTiros.stream().limit(5).mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(0.0);
 
-        // 3. Calcula os Níveis Matemáticos Exatos para Terça, Quinta e Sábado
         int nivelTerca = calcularNivelDinamicoCenario1(listaTercas, listaSabados, "TERÇA-FEIRA");
         int nivelQuinta = calcularNivelDinamicoCenario2(listaTiros, mediaEficienciaTiros);
         int nivelSabado = calcularNivelDinamicoCenario1(listaTercas, listaSabados, "SÁBADO");
 
+        // 🎯 MAPEAMENTO DA BASE DO MONGODB (Exatamente como no InsightService)
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
 
         StringBuilder sb = new StringBuilder();
         sb.append("VOCÊ É O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
-        sb.append("SUA MISSÃO É ANALISAR O HISTÓRICO DA SEMANA ANTERIOR E GERAR O PLANEJAMENTO COMPLETO DA SEMANA ATUAL PARA O ATLETA ")
+        sb.append("SUA MISSÃO É CONSULTAR AS DIRETRIZES TÉCNICAS DO MONGODB E GERAR O PLANEJAMENTO COMPLETO DA SEMANA ATUAL PARA O ATLETA ")
                 .append(user.getName().toUpperCase()).append(".\n\n");
 
-        sb.append("REGRA MANDATÓRIA DE FORMATAÇÃO: GERE O CONTEÚDO DOS CAMPOS INTERNOS UTILIZANDO APENAS TEXTO PURO. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN (COMO ASTERISCOS, NEGRITO, HASHTAGS OU NEGRITOS DUPLOS) DENTRO DAS TAGS XML.\n\n");
+        sb.append("REGRA MANDATÓRIA DE FORMATAÇÃO: GERE O CONTEÚDO DOS CAMPOS UTILIZANDO APENAS TEXTO PURO. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN (COMO ASTERISCOS, NEGRITO, HASHTAGS OU NEGRITOS DUPLOS) DENTRO DAS TAGS XML.\n\n");
 
         if (scientificContext != null && !scientificContext.isBlank()) {
-            sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO (MONGODB) ---\n");
+            sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO E DIRETRIZES DO MONGODB ---\n");
+            sb.append("INSTRUÇÃO DE CONSULTA: Consulte os documentos JSON abaixo e localize os parâmetros do Cenário e Nível de cada dia. Extraia exatamente o tipo de treino, a duração, a distância estimada, as faixas de FC/bpm, o foco técnico e o método detalhado (com repetições/tiros se houver).\n");
             sb.append(scientificContext).append("\n\n");
         }
 
-        sb.append("--- HISTÓRICO DE TREINOS DA SEMANA ANTERIOR ---\n");
+        sb.append("--- HISTÓRICO DE PERFORMANCE RECENTE DO ATLETA ---\n");
         if (treinosAnteriores.isEmpty()) {
-            sb.append("Nenhum treino registrado na semana passada. Considere um retorno gradual.\n\n");
+            sb.append("Nenhum treino registrado na semana passada. Aplique os parâmetros padrão do MongoDB para retorno gradual.\n\n");
         } else {
             for (ActivitySummaryEntity act : treinosAnteriores) {
                 sb.append(String.format("• Data: %s | Distância: %.2f km | FC Méd: %.0f bpm | Eficiência: %.3f | Cenário: %d\n",
@@ -3547,47 +3514,50 @@ public class WeeklyPlannerService {
             sb.append("\n");
         }
 
-        sb.append("--- DIRETRIZES E NÍVEIS MANDATÓRIOS CALCULADOS PELO SISTEMA ---\n");
-        sb.append("1. TERÇA-FEIRA (").append(terca).append("): Prescrever CENÁRIO 1 em NÍVEL ").append(nivelTerca).append(" (Rodagem Leve / Z2 - FATMAX).\n");
-        sb.append("2. QUINTA-FEIRA (").append(quinta).append("): Prescrever CENÁRIO 2 em NÍVEL ").append(nivelQuinta).append(" (Intensificação / Tiros / VO2máx).\n");
-        sb.append("3. SÁBADO (").append(sabado).append("): Prescrever CENÁRIO 1 em NÍVEL ").append(nivelSabado).append(" (Longão / Rodagem de Base - Zona 2).\n\n");
+        sb.append("--- DIRETRIZES DE CENÁRIO E NÍVEIS OBRIGATÓRIOS DO SISTEMA ---\n");
+        sb.append("1. TERÇA-FEIRA (").append(terca).append("): Prescrever CENÁRIO 1 no NÍVEL ").append(nivelTerca).append(" (Rodagem Leve / Z2 - FATMAX).\n");
+        sb.append("2. QUINTA-FEIRA (").append(quinta).append("): Prescrever CENÁRIO 2 no NÍVEL ").append(nivelQuinta).append(" (Intensificação / Tiros / VO2máx).\n");
+        sb.append("3. SÁBADO (").append(sabado).append("): Prescrever CENÁRIO 1 no NÍVEL ").append(nivelSabado).append(" (Longão / Rodagem de Base - Zona 2).\n\n");
 
         sb.append("FORMATO DE SAÍDA EXIGIDO:\n");
-        sb.append("Retorne OBRIGATORIAMENTE o bloco XML a seguir contendo exatamente as 3 prescrições:\n\n");
+        sb.append("Monte o planejamento baseado estritamente nos dados lidos do MongoDB e retorne OBRIGATORIAMENTE o bloco XML a seguir:\n\n");
         sb.append("<weekly_prescription>\n");
 
         sb.append("  <prescription>\n");
         sb.append("    <scheduled_date>").append(terca).append("</scheduled_date>\n");
-        sb.append("    <type>[Tipo do treino de Terça]</type>\n");
-        sb.append("    <duration>[Duração em minutos]</duration>\n");
-        sb.append("    <intensity>[Faixa de Zonas de FC/BPM]</intensity>\n");
-        sb.append("    <focus>[Foco técnico]</focus>\n");
-        sb.append("    <method>[Descrição detalhada do método]</method>\n");
-        sb.append("    <justification>[Explicação do motivo da escolha com base na eficiência da semana anterior]</justification>\n");
+        sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
+        sb.append("    <distance_km>[Distância conforme MongoDB ex: 10.0]</distance_km>\n");
+        sb.append("    <duration>[Duração em minutos conforme MongoDB]</duration>\n");
+        sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
+        sb.append("    <focus>[Foco técnico do nível no MongoDB]</focus>\n");
+        sb.append("    <method>[Descrição detalhada do método conforme MongoDB]</method>\n");
+        sb.append("    <justification>[Justificativa fisiológica da escolha]</justification>\n");
         sb.append("    <target_scenario>1</target_scenario>\n");
         sb.append("    <target_level>").append(nivelTerca).append("</target_level>\n");
         sb.append("  </prescription>\n");
 
         sb.append("  <prescription>\n");
         sb.append("    <scheduled_date>").append(quinta).append("</scheduled_date>\n");
-        sb.append("    <type>[Tipo do treino de Quinta]</type>\n");
-        sb.append("    <duration>[Duração em minutos]</duration>\n");
-        sb.append("    <intensity>[Faixa de Zonas de FC/BPM]</intensity>\n");
-        sb.append("    <focus>[Foco técnico]</focus>\n");
-        sb.append("    <method>[Descrição detalhada dos tiros e pausas]</method>\n");
-        sb.append("    <justification>[Explicação do motivo da escolha dos tiros com base na eficiência]</justification>\n");
+        sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
+        sb.append("    <distance_km>[Distância conforme MongoDB ex: 7.8]</distance_km>\n");
+        sb.append("    <duration>[Duração em minutos conforme MongoDB]</duration>\n");
+        sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
+        sb.append("    <focus>[Foco técnico do nível no MongoDB]</focus>\n");
+        sb.append("    <method>[Detalhamento de Séries, Tiros, Pausas e Zonas conforme MongoDB]</method>\n");
+        sb.append("    <justification>[Justificativa fisiológica da escolha dos tiros]</justification>\n");
         sb.append("    <target_scenario>2</target_scenario>\n");
         sb.append("    <target_level>").append(nivelQuinta).append("</target_level>\n");
         sb.append("  </prescription>\n");
 
         sb.append("  <prescription>\n");
         sb.append("    <scheduled_date>").append(sabado).append("</scheduled_date>\n");
-        sb.append("    <type>[Tipo do treino de Sábado]</type>\n");
-        sb.append("    <duration>[Duração em minutos]</duration>\n");
-        sb.append("    <intensity>[Faixa de Zonas de FC/BPM]</intensity>\n");
-        sb.append("    <focus>[Foco técnico]</focus>\n");
-        sb.append("    <method>[Descrição detalhada do método]</method>\n");
-        sb.append("    <justification>[Explicação do motivo da escolha do volume com base na eficiência]</justification>\n");
+        sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
+        sb.append("    <distance_km>[Distância conforme MongoDB ex: 16.0]</distance_km>\n");
+        sb.append("    <duration>[Duração em minutos conforme MongoDB]</duration>\n");
+        sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
+        sb.append("    <focus>[Foco técnico do nível no MongoDB]</focus>\n");
+        sb.append("    <method>[Descrição detalhada do método do Longão conforme MongoDB]</method>\n");
+        sb.append("    <justification>[Justificativa fisiológica do volume]</justification>\n");
         sb.append("    <target_scenario>1</target_scenario>\n");
         sb.append("    <target_level>").append(nivelSabado).append("</target_level>\n");
         sb.append("  </prescription>\n");
@@ -3597,10 +3567,6 @@ public class WeeklyPlannerService {
         return geminiClient.getInsight(sb.toString());
     }
 
-    /**
-     * Faz o parse da resposta em XML enviada pelo Gemini, salva cada prescrição no MySQL
-     * e dispara uma notificação formatada para o Telegram.
-     */
     public void processarESalvarPrescricoes(String rawXml, UserEntity user) {
         if (rawXml == null || !rawXml.contains("<weekly_prescription>")) {
             log.error("[WEEKLY PLANNER] Resposta inválida ou sem bloco <weekly_prescription> da IA.");
@@ -3608,7 +3574,7 @@ public class WeeklyPlannerService {
         }
 
         StringBuilder msgTelegram = new StringBuilder();
-        msgTelegram.append("📅 *PLANEJAMENTO SEMANAL STRAFIT*\n");
+        msgTelegram.append("📅 PLANEJAMENTO SEMANAL STRAFIT\n");
         msgTelegram.append("Atleta: ").append(user.getName()).append("\n\n");
 
         Pattern prescriptionPattern = Pattern.compile("<prescription>(.*?)</prescription>", Pattern.DOTALL);
@@ -3622,23 +3588,31 @@ public class WeeklyPlannerService {
 
             LocalDate scheduledDate = LocalDate.parse(scheduledDateStr.replaceAll("[^0-9-]", ""));
 
-            // Procura se já existe prescrição para essa data (Upsert por scheduledDate)
             WorkoutPrescriptionEntity prescription = workoutPrescriptionRepository
                     .findByScheduledDate(scheduledDate)
                     .orElse(new WorkoutPrescriptionEntity());
 
             prescription.setScheduledDate(scheduledDate);
+            prescription.setActivityId(0L);
             prescription.setType(sanitizeText(extractTagValue(block, "type")));
             prescription.setDuration(sanitizeText(extractTagValue(block, "duration")));
             prescription.setIntensity(sanitizeText(extractTagValue(block, "intensity")));
             prescription.setFocus(sanitizeText(extractTagValue(block, "focus")));
 
-            // Une o método com a justificativa técnica para persistir no banco
+            String distanceStr = extractTagValue(block, "distance_km");
+            if (distanceStr != null && !distanceStr.isBlank()) {
+                try {
+                    prescription.setDistanceKm(Double.parseDouble(distanceStr.replaceAll("[^0-9.]", "")));
+                } catch (Exception e) {
+                    prescription.setDistanceKm(0.0);
+                }
+            }
+
             String method = sanitizeText(extractTagValue(block, "method"));
             String justification = sanitizeText(extractTagValue(block, "justification"));
 
             if (justification != null && !justification.isBlank()) {
-                prescription.setMethod(method + "\n\n💡 *Justificativa Técnica:* " + justification);
+                prescription.setMethod(method + "\n\n💡 Justificativa Técnica: " + justification);
             } else {
                 prescription.setMethod(method);
             }
@@ -3646,23 +3620,27 @@ public class WeeklyPlannerService {
             String targetScenarioStr = extractTagValue(block, "target_scenario");
             String targetLevelStr = extractTagValue(block, "target_level");
 
-            prescription.setTargetScenario(targetScenarioStr != null ? Integer.parseInt(targetScenarioStr.trim()) : 1);
-            prescription.setTargetLevel(targetLevelStr != null ? Integer.parseInt(targetLevelStr.trim()) : 1);
+            int scenario = targetScenarioStr != null ? Integer.parseInt(targetScenarioStr.trim()) : 1;
+            int level = targetLevelStr != null ? Integer.parseInt(targetLevelStr.trim()) : 1;
+
+            prescription.setTargetScenario(scenario);
+            prescription.setTargetLevel(level);
             prescription.setRawGeminiResponse(block);
 
             workoutPrescriptionRepository.save(prescription);
             log.info("[WEEKLY PLANNER] Prescrição salva para a data: {}", scheduledDate);
 
-            // Monta o resumo formatado para o Telegram
-            msgTelegram.append("📌 *").append(scheduledDate.getDayOfWeek().toString()).append(" (").append(scheduledDate).append(")*\n")
-                    .append("• *Treino:* ").append(prescription.getType()).append("\n")
-                    .append("• *Duração:* ").append(prescription.getDuration()).append("\n")
-                    .append("• *Intensidade:* ").append(prescription.getIntensity()).append("\n")
-                    .append("• *Foco:* ").append(prescription.getFocus()).append("\n\n");
+            // Monta o resumo formatado em Texto Puro (Sem Markdown)
+            msgTelegram.append("📌 ").append(scheduledDate.getDayOfWeek().toString()).append(" (").append(scheduledDate).append(")\n")
+                    .append("• Treino: ").append(prescription.getType()).append(" | Nível ").append(level).append("\n")
+                    .append("• Volume / Distância: ").append(distanceStr != null ? distanceStr + " km" : "N/A").append(" (").append(prescription.getDuration()).append(")\n")
+                    .append("• Intensidade: ").append(prescription.getIntensity()).append("\n")
+                    .append("• Estrutura / Método: ").append(method).append("\n")
+                    .append("• Foco Técnico: ").append(prescription.getFocus()).append("\n\n");
         }
 
-        // Dispara mensagem com a grade completa da semana
-        telegramClient.sendMessage(msgTelegram.toString());
+        // Sanitiza o texto completo antes de enviar
+        telegramClient.sendMessage(sanitizeText(msgTelegram.toString()));
         log.info("[WEEKLY PLANNER] Notificação enviada para o Telegram.");
     }
 
