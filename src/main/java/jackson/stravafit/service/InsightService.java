@@ -408,16 +408,6 @@ public class InsightService {
         sb.append("- Nível Atual no Cenário 2 (Tiros de Quinta): NÍVEL ").append(nivelAtualCenario2).append("\n");
         sb.append("REGRA INVIOLÁVEL: Você está ESTRITAMENTE PROIBIDA de recalcular, alterar, promover ou rebaixar o nível determinado acima.\n\n");
 
-        sb.append("--- DADOS DE PRESCRIÇÃO E DIRETRIZES DO MONGODB (MANDATÓRIO) ---\n");
-        sb.append("Próximo Treino Agendado: ").append(proximoTreinoData.toUpperCase()).append("\n");
-        sb.append("📌 REGRAS DE PRESCRIÇÃO POR DIA DA SEMANA:\n")
-                .append("- TERÇA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 1 (Rodagem Leve/Desenvolvimento em Zona 2 - FATMAX).\n")
-                .append("- QUINTA-FEIRA: Obrigatoriamente prescrição de CENÁRIO 2 (Intensificação / Tiros / VO2máx - Z3/Z4).\n")
-                .append("- SÁBADO/DOMINGO: Obrigatoriamente prescrição de CENÁRIO 1 (Longão / Rodagem de Base - Zona 2).\n\n");
-        sb.append("Média Real Tiros (Quintas): ").append(String.format("%.3f", mediaEficienciaTiros)).append("\n");
-        sb.append("Média Real Rodagem (Terças): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append("\n");
-        sb.append("Média Real Longão (Sábados): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append("\n\n");
-
         sb.append("=================================================================\n");
         sb.append("🚨 DIRECTIVE DE SAÍDA EXCLUSIVA (ESTRITO CUMPRIMENTO MANDATÓRIO) 🚨\n");
         sb.append("=================================================================\n");
@@ -504,14 +494,18 @@ public class InsightService {
         sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (");
         sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA, PACE DRIFT E EFICIÊNCIA]\n");
         sb.append("• Use o nome do atleta e desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
+        sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO AMBIENTAL (CLIMA E ALTIMETRIA):\n");
         sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
-        sb.append("  - Dados Climáticos: ").append(climaHeader).append("\n");
-        // Substituir a linha da elevação por:
-        sb.append("  - Elevação x Efficiency Index: O Efficiency Index (")
+
+       sb.append("  - DIRETRIZ DE IMPACTO AMBIENTAL: Em casos de STATUS [CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO] ou desempenho excepcional/abaixo do esperado, analise OBRIGATORIAMENTE o impacto direto do ganho/perda de elevação e das condições climáticas sobre o ritmo, fadiga e frequência cardíaca do atleta, utilizando os dados abaixo:\n")
+                .append("     Condições Climáticas: ").append(climaHeader).append("\n")
+                .append("     Altimetria Acumulada: +").append(String.format("%.0f", metrics.ganhoAlt())).append("m de ganho / -").append(String.format("%.0f", Math.abs(metrics.perdaAlt())))
+                .append("m de perda (Variação Total em Circuito: ")
+                .append(String.format("%.0f", metrics.ganhoAlt() + Math.abs(metrics.perdaAlt()))).append("m)\n")
+                .append("     Elevação x Efficiency Index: O Efficiency Index de ")
                 .append(String.format("%.3f", metrics.efficiencyIndex()))
-                .append(") já contempla a variação de ")
-                .append(String.format("%.0f", metrics.ganhoAlt()))
-                .append(" metros de ganho altimétrico\n");
+                .append(" já matematicamente contempla essa variação altimétrica, mas o custo neuromuscular e térmico das subidas/descidas/clima deve ser explicitado no diagnóstico.\n\n");
+
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" picos intervalados identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n");
         sb.append("• CORRELAÇÃO POSITIVA (VO2MÁX x EFIC): Explique como o VO2máx estimado de hoje (")
@@ -568,7 +562,7 @@ public class InsightService {
 
     public record SessionMetrics(double fcMedia, double fcMax, int duracao, double stdDev, int zonaPredominante,
                                  double z2Percent, String comportamento, double fcMaxPercentage, double vo2MaxEstimado,
-                                 double ganhoAlt, double efficiencyIndex, double safeDistance, String paceFormatted,
+                                 double ganhoAlt, double perdaAlt, double efficiencyIndex, double safeDistance, String paceFormatted,
                                  Map<Integer, Double> zonePercentages) {
     }
 
@@ -610,9 +604,24 @@ public class InsightService {
         double fcMaxPercentage = (fcMax / hrMax) * 100;
         double vo2MaxEstimado = 15.3 * (fcMax / (double) hrRest);
 
-        DoubleSummaryStatistics elevStats = analysis.stream().map(StravaActivity.MinuteAnalysis::getAverageElevation).filter(Objects::nonNull).mapToDouble(Double::doubleValue).summaryStatistics();
-        double ganhoAlt = elevStats.getMax() - elevStats.getMin();
-        if (ganhoAlt < 0 || elevStats.getCount() == 0) ganhoAlt = 0.0;
+        double ganhoAlt = 0.0;
+        double perdaAlt = 0.0;
+
+        if (analysis != null && analysis.size() > 1) {
+            for (int i = 1; i < analysis.size(); i++) {
+                Double elevAtual = analysis.get(i).getAverageElevation();
+                Double elevAnterior = analysis.get(i - 1).getAverageElevation();
+
+                if (elevAtual != null && elevAnterior != null) {
+                    double diff = elevAtual - elevAnterior;
+                    if (diff > 0) {
+                        ganhoAlt += diff;
+                    } else if (diff < 0) {
+                        perdaAlt += Math.abs(diff);
+                    }
+                }
+            }
+        }
 
         double safeDistance = distance != null ? distance : 0.0;
         // 🎯 Calcula o total de metros normalizados com compensação de altimetria (Minetti)
@@ -620,13 +629,17 @@ public class InsightService {
                 ? analysis.stream().mapToDouble(StravaActivity.MinuteAnalysis::getNormalizedSpeedMpm).sum()
                 : 0.0;
 
-// Se houver cálculo normalizado, usa ele; caso contrário, recorre à distância bruta como fallback
+
         double metrosParaCalculo = totalMetrosNormalizados > 0 ? totalMetrosNormalizados : (safeDistance * 1000.0);
 
         double efficiencyIndex = (fcMedia > 0 && duracao > 0) ? metrosParaCalculo / (fcMedia * duracao) : 0.0;
         String paceFormatted = formatSpeedToPace(averageSpeed);
 
-        return new SessionMetrics(fcMedia, fcMax, duracao, stdDev, zonaPredominante, z2Percent, comportamento, fcMaxPercentage, vo2MaxEstimado, ganhoAlt, efficiencyIndex, safeDistance, paceFormatted, zonePercentages);
+        return new SessionMetrics(
+                fcMedia, fcMax, duracao, stdDev, zonaPredominante, z2Percent,
+                comportamento, fcMaxPercentage, vo2MaxEstimado, ganhoAlt, perdaAlt,
+                efficiencyIndex, safeDistance, paceFormatted, zonePercentages
+        );
     }
 
     private String extractXmlBlock(String text) {

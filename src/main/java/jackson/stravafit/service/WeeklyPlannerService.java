@@ -57,12 +57,12 @@ public class WeeklyPlannerService {
         LocalDateTime inicioSemanaAnterior = hoje.minusWeeks(1).with(DayOfWeek.MONDAY).atStartOfDay();
         LocalDateTime fimSemanaAnterior = hoje.minusWeeks(1).with(DayOfWeek.SUNDAY).atTime(23, 59, 59);
 
-        log.info("[WEEKLY PLANNER] Buscando treinos entre {} e {}", inicioSemanaAnterior, fimSemanaAnterior);
+        log.info("[WEEKLY PLANNER] Buscando treinos na tabela 'activity_performance_summary' entre {} e {}", inicioSemanaAnterior, fimSemanaAnterior);
 
         return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemanaAnterior, fimSemanaAnterior);
     }
 
-    private int calcularNivelDinamicoCenario1(List<ActivitySummaryEntity> listaTercas, List<ActivitySummaryEntity> listaSabados, String proximoTreinoData) {
+    private int calcularNivelDinamicoCenario1(List<ActivitySummaryEntity> listaSabados, String proximoTreinoData) {
         boolean proximoTreinoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
 
         if (proximoTreinoEhSabado) {
@@ -134,47 +134,58 @@ public class WeeklyPlannerService {
         List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
 
-        List<ActivitySummaryEntity> listaTercas = listaCenario1.stream()
-                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
-                .toList();
-
         List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
-                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
                 .toList();
 
         double mediaEficienciaTiros = listaTiros.stream().limit(5).mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(0.0);
 
-        int nivelTerca = calcularNivelDinamicoCenario1(listaTercas, listaSabados, "TERÇA-FEIRA");
+        int nivelTerca = calcularNivelDinamicoCenario1(listaSabados, "TERÇA-FEIRA");
         int nivelQuinta = calcularNivelDinamicoCenario2(listaTiros, mediaEficienciaTiros);
-        int nivelSabado = calcularNivelDinamicoCenario1(listaTercas, listaSabados, "SÁBADO");
+        int nivelSabado = calcularNivelDinamicoCenario1(listaSabados, "SÁBADO");
 
-        // 🎯 MAPEAMENTO DA BASE DO MONGODB (Exatamente como no InsightService)
+        // 🎯 BASE CIENTÍFICA NO MONGODB PASSANDO O ENUM GENDER
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
 
         StringBuilder sb = new StringBuilder();
         sb.append("VOCÊ É O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
-        sb.append("SUA MISSÃO É CONSULTAR AS DIRETRIZES TÉCNICAS DO MONGODB E GERAR O PLANEJAMENTO COMPLETO DA SEMANA ATUAL PARA O ATLETA ")
+        sb.append("SUA MISSÃO É ANALISAR O HISTÓRICO DE ATIVIDADES REGISTRADAS NO MYSQL (TABELA activity_performance_summary), FAZER UM RESUMO DA SEMANA PASSADA, CONSULTAR AS DIRETRIZES DO MONGODB E GERAR O PLANEJAMENTO DA NOVA SEMANA PARA O ATLETA ")
                 .append(user.getName().toUpperCase()).append(".\n\n");
 
         sb.append("REGRA MANDATÓRIA DE FORMATAÇÃO: GERE O CONTEÚDO DOS CAMPOS UTILIZANDO APENAS TEXTO PURO. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN (COMO ASTERISCOS, NEGRITO, HASHTAGS OU NEGRITOS DUPLOS) DENTRO DAS TAGS XML.\n\n");
 
         if (scientificContext != null && !scientificContext.isBlank()) {
-            sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO E DIRETRIZES DO MONGODB ---\n");
-            sb.append("INSTRUÇÃO DE CONSULTA: Consulte os documentos JSON abaixo e localize os parâmetros do Cenário e Nível de cada dia. Extraia exatamente o tipo de treino, a duração, a distância estimada, as faixas de FC/bpm, o foco técnico e o método detalhado (com repetições/tiros se houver).\n");
+            sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO E DIRETRIZES DE PRESCRIÇÃO (MONGODB) ---\n");
+            sb.append("INSTRUÇÃO DE CONSULTA: Consulte os documentos JSON abaixo e localize os parâmetros do Cenário e Nível de cada dia. Extraia exatamente o tipo de treino, a duração, a distância estimada, as faixas de FC/bpm, o foco técnico e o método detalhado.\n");
             sb.append(scientificContext).append("\n\n");
         }
 
-        sb.append("--- HISTÓRICO DE PERFORMANCE RECENTE DO ATLETA ---\n");
         if (treinosAnteriores.isEmpty()) {
-            sb.append("Nenhum treino registrado na semana passada. Aplique os parâmetros padrão do MongoDB para retorno gradual.\n\n");
+            sb.append("Nenhum treino registrado no MySQL na semana passada. Aplique os parâmetros padrão do MongoDB para retorno gradual.\n\n");
         } else {
+            // 1. Título e instrução impressos apenas UMA vez antes da lista
+            sb.append("--- HISTÓRICO DE PERFORMANCE E ANÁLISES DA SEMANA ANTERIOR (TABELA MYSQL: activity_performance_summary) ---\n")
+                    .append("INSTRUÇÃO DE PROCESSAMENTO DA SEMANA: Consulte e analise os registros da tabela 'activity_performance_summary' listados abaixo. ")
+                    .append("Sua missão é realizar a leitura interna dos dados e do campo 'ai_analysis_summary' de cada treino executado na semana anterior e gerar EXCLUSIVAMENTE uma síntese/conclusão geral do desempenho do atleta. ")
+                    .append("Não reimprima os textos ou dados individuais de cada treino no relatório final; utilize-os apenas como insumo interno para compor a visão consolidada da semana na tag <weekly_overview>.\n\n");
+
+            // 2. O laço percorre apenas os registros
             for (ActivitySummaryEntity act : treinosAnteriores) {
-                sb.append(String.format("• Data: %s | Distância: %.2f km | FC Méd: %.0f bpm | Eficiência: %.3f | Cenário: %d\n",
-                        act.getStartDate().toLocalDate(),
+                LocalDate dataTreino = act.getStartDate() != null ? act.getStartDate().toLocalDate() : hoje;
+
+                sb.append(String.format("• Data: %s | Distância: %.2f km | Duração: %d min | FC Méd: %.0f bpm | Eficiência: %.3f | Cenário: %d\n",
+                        dataTreino,
                         act.getDistanceKm() != null ? act.getDistanceKm() : 0.0,
+                        act.getTotalTimeMinutes() != null ? act.getTotalTimeMinutes() : 0,
                         act.getAverageHeartRate() != null ? act.getAverageHeartRate() : 0.0,
                         act.getEfficiencyIndex() != null ? act.getEfficiencyIndex() : 0.0,
                         act.getDetectedScenario() != null ? act.getDetectedScenario() : 1));
+
+                if (act.getAiAnalysisSummary() != null && !act.getAiAnalysisSummary().isBlank()) {
+                    sb.append("   Análise Realizada da Atividade: ")
+                            .append(act.getAiAnalysisSummary().replaceAll("\n", " "))
+                            .append("\n");
+                }
             }
             sb.append("\n");
         }
@@ -185,8 +196,10 @@ public class WeeklyPlannerService {
         sb.append("3. SÁBADO (").append(sabado).append("): Prescrever CENÁRIO 1 no NÍVEL ").append(nivelSabado).append(" (Longão / Rodagem de Base - Zona 2).\n\n");
 
         sb.append("FORMATO DE SAÍDA EXIGIDO:\n");
-        sb.append("Monte o planejamento baseado estritamente nos dados lidos do MongoDB e retorne OBRIGATORIAMENTE o bloco XML a seguir:\n\n");
+        sb.append("Monte o planejamento baseado estritamente nas análises da semana lidas do MySQL cruzadas com as diretrizes do MongoDB. Retorne OBRIGATORIAMENTE o bloco XML a seguir:\n\n");
         sb.append("<weekly_prescription>\n");
+
+        sb.append("  <weekly_overview>[Faça um breve balanço de 3 a 5 linhas analisando a consistência, eficiência e volume do atleta na semana anterior baseado nos treinos do MySQL.]</weekly_overview>\n\n");
 
         sb.append("  <prescription>\n");
         sb.append("    <scheduled_date>").append(terca).append("</scheduled_date>\n");
@@ -242,6 +255,13 @@ public class WeeklyPlannerService {
         msgTelegram.append("📅 PLANEJAMENTO SEMANAL STRAFIT\n");
         msgTelegram.append("Atleta: ").append(user.getName()).append("\n\n");
 
+        String overview = sanitizeText(extractTagValue(rawXml, "weekly_overview"));
+        if (overview != null && !overview.isBlank()) {
+            msgTelegram.append("📊 RESUMO DA SEMANA ANTERIOR:\n")
+                    .append(overview).append("\n\n")
+                    .append("------------------------------------\n\n");
+        }
+
         Pattern prescriptionPattern = Pattern.compile("<prescription>(.*?)</prescription>", Pattern.DOTALL);
         Matcher matcher = prescriptionPattern.matcher(rawXml);
 
@@ -293,9 +313,9 @@ public class WeeklyPlannerService {
             prescription.setRawGeminiResponse(block);
 
             workoutPrescriptionRepository.save(prescription);
-            log.info("[WEEKLY PLANNER] Prescrição salva para a data: {}", scheduledDate);
+            log.info("[WEEKLY PLANNER] Prescrição salva no MySQL para a data: {}", scheduledDate);
 
-            // Monta o resumo formatado em Texto Puro (Sem Markdown)
+            // Monta o resumo formatado em Texto Puro para o Telegram
             msgTelegram.append("📌 ").append(scheduledDate.getDayOfWeek().toString()).append(" (").append(scheduledDate).append(")\n")
                     .append("• Treino: ").append(prescription.getType()).append(" | Nível ").append(level).append("\n")
                     .append("• Volume / Distância: ").append(distanceStr != null ? distanceStr + " km" : "N/A").append(" (").append(prescription.getDuration()).append(")\n")
@@ -304,7 +324,6 @@ public class WeeklyPlannerService {
                     .append("• Foco Técnico: ").append(prescription.getFocus()).append("\n\n");
         }
 
-        // Sanitiza o texto completo antes de enviar
         telegramClient.sendMessage(sanitizeText(msgTelegram.toString()));
         log.info("[WEEKLY PLANNER] Notificação enviada para o Telegram.");
     }

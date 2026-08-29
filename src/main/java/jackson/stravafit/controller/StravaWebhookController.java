@@ -52,10 +52,8 @@ public class StravaWebhookController {
         String aspectType = (String) payload.get("aspect_type"); // create, update, delete
         Object objectId = payload.get("object_id");
 
-        if ("activity".equals(objectType) && "create".equals(aspectType)) {
-            log.info("[WEBHOOK] Nova atividade detectada (ID: {})! Disparando sincronização...", objectId);
-
-            // ✨ CORREÇÃO CIRÚRGICA: Alinhando com o novo método reativo
+        if ("activity".equals(objectType) && ("create".equals(aspectType) || "update".equals(aspectType))) {
+            log.info("[WEBHOOK] Atividade detectada (ID: {}, Ação: {})! Disparando sincronização...", objectId, aspectType);
             syncScheduler.executarSincronizacao();
         }
 
