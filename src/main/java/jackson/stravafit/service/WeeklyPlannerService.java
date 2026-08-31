@@ -34,6 +34,7 @@ public class WeeklyPlannerService {
     private final KnowledgeService knowledgeService;
     private final TelegramClient telegramClient;
 
+
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
 
     @Scheduled(cron = "0 0 16 * * MON", zone = "America/Sao_Paulo")
@@ -58,12 +59,13 @@ public class WeeklyPlannerService {
     public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior() {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
-        LocalDateTime inicioSemanaAnterior = hoje.minusWeeks(1).with(DayOfWeek.MONDAY).atStartOfDay();
-        LocalDateTime fimSemanaAnterior = hoje.minusWeeks(1).with(DayOfWeek.SUNDAY).atTime(23, 59, 59);
+        // Pega de Segunda-Feira da semana corrente até o final do dia de hoje (Sábado)
+        LocalDateTime inicioSemana = hoje.with(DayOfWeek.MONDAY).atStartOfDay();
+        LocalDateTime fimSemana = hoje.atTime(23, 59, 59);
 
-        log.info("[WEEKLY PLANNER] Buscando treinos na tabela 'activity_performance_summary' entre {} e {}", inicioSemanaAnterior, fimSemanaAnterior);
+        log.info("[WEEKLY PLANNER] Buscando treinos da semana entre {} e {}", inicioSemana, fimSemana);
 
-        return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemanaAnterior, fimSemanaAnterior);
+        return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
     }
 
     private int calcularNivelDinamicoCenario1(List<ActivitySummaryEntity> listaSabados, String proximoTreinoData) {

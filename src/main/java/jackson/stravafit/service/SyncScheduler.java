@@ -28,7 +28,7 @@ public class SyncScheduler {
     private final TelegramClient telegramClient;
     private final ActivityRepository activityRepository;
     private final UserRepository userRepository;
-    // Removido: ConfigurableApplicationContext context
+    private final WeeklyPlannerService weeklyPlannerService;
 
     @Value("${strava.auto-start:false}")
     private boolean autoStart;
@@ -109,6 +109,23 @@ public class SyncScheduler {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
                 activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
                 log.info("   [TELEGRAM] Análise do novo treino enviada.");
+
+                // 🎯 GATILHO REATIVO: Se o treino for no sábado, dispara o planejamento da próxima semana
+                try {
+                    if (activity.getStartDateLocal() != null) {
+                        String dateStr = activity.getStartDateLocal().replace("Z", "");
+                        java.time.LocalDateTime startDate = java.time.LocalDateTime.parse(
+                                dateStr, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+
+                        if (startDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY) {
+                            log.info("   [WEEKLY PLANNER] Treino de sábado detectado! Disparando planejamento para a próxima semana...");
+                            weeklyPlannerService.gerenciarPlanejamentoSemanal();
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("   [WEEKLY PLANNER] Erro ao disparar planejamento semanal automático: {}", e.getMessage(), e);
+                }
+
             } else {
                 log.warn("   [GEMINI] Falha temporária. Atividade salva sem insight.");
                 activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
