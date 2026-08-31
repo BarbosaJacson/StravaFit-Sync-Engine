@@ -36,19 +36,23 @@ public class WeeklyPlannerService {
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
 
-    @Scheduled(cron = "0 0 8 * * MON", zone = "America/Sao_Paulo")
+    @Scheduled(cron = "0 0 16 * * MON", zone = "America/Sao_Paulo")
     @Transactional
     public void gerenciarPlanejamentoSemanal() {
         log.info("[WEEKLY PLANNER] Iniciando geração do plano de treino para a semana...");
+        try {
+            UserEntity user = userRepository.findById(1L)
+                    .orElseThrow(() -> new IllegalStateException("Atleta principal não cadastrado."));
 
-        UserEntity user = userRepository.findById(1L)
-                .orElseThrow(() -> new IllegalStateException("Atleta principal não cadastrado."));
+            List<ActivitySummaryEntity> treinosAnteriores = buscarTreinosSemanaAnterior();
 
-        List<ActivitySummaryEntity> treinosAnteriores = buscarTreinosSemanaAnterior();
+            String respostaIA = gerarPrescricaoSemanalIA(user, treinosAnteriores);
 
-        String respostaIA = gerarPrescricaoSemanalIA(user, treinosAnteriores);
-
-        processarESalvarPrescricoes(respostaIA, user);
+            processarESalvarPrescricoes(respostaIA, user);
+            log.info("[WEEKLY PLANNER] Planejamento semanal concluído com sucesso.");
+        } catch (Exception e) {
+            log.error("[WEEKLY PLANNER] Erro crítico ao gerar planejamento semanal: {}", e.getMessage(), e);
+        }
     }
 
     public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior() {
