@@ -10,20 +10,29 @@ import java.util.Optional;
 @Repository
 public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPrescriptionEntity, Long> {
 
-    // Busca a última prescrição para uma data específica
+    /**
+     * Busca a prescrição exatamente agendada para a data informada (Prioridade 1 no InsightService).
+     */
+    Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
+
+    /**
+     * Busca a prescrição mais recente agendada para uma data específica, ordenando pela criação.
+     */
     Optional<WorkoutPrescriptionEntity> findTopByScheduledDateOrderByCreatedAtDesc(LocalDate scheduledDate);
 
-    // Busca a última prescrição gerada, independente da data
-    //Optional<WorkoutPrescriptionEntity> findTopByOrderByCreatedAtDesc();
-
-    // Busca a prescrição mais recente agendada até a data da atividade (<= scheduledDate)
+    /**
+     * Fallback: Busca a prescrição mais recente agendada até a data informada (<= scheduledDate).
+     * Ordena primariamente pela data agendada decrescente e secundariamente pela data de criação.
+     */
     Optional<WorkoutPrescriptionEntity> findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(LocalDate scheduledDate);
-    
-    // Adicionado para a lógica de UPSERT no InsightService
+
+    /**
+     * Busca a prescrição associada a uma atividade do Strava específica (Upsert/Mapeamento).
+     */
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
 
-    // ✨ MÉTODO ADICIONADO PARA O PLANEJAMENTO SEMANAL (Upsert por Data):
-    Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
-    // Busca a prescrição mais recente de um cenário específico (ex: Cenário 1 ou Cenário 2)
+    /**
+     * Busca a prescrição mais recente de um cenário específico (Cenário 1 = Rodagem/Z2, Cenário 2 = Tiros).
+     */
     Optional<WorkoutPrescriptionEntity> findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Integer targetScenario);
 }

@@ -34,7 +34,6 @@ public class WeeklyPlannerService {
     private final KnowledgeService knowledgeService;
     private final TelegramClient telegramClient;
 
-
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
 
     @Scheduled(cron = "0 0 16 * * MON", zone = "America/Sao_Paulo")
@@ -68,63 +67,14 @@ public class WeeklyPlannerService {
         return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
     }
 
-    private int calcularNivelDinamicoCenario1(List<ActivitySummaryEntity> listaSabados, String proximoTreinoData) {
-        boolean proximoTreinoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
-
-        if (proximoTreinoEhSabado) {
-            if (listaSabados.isEmpty()) {
-                return 2;
-            }
-
-            ActivitySummaryEntity ultimoSabado = listaSabados.get(0);
-            double ultimaDistanciaKm = ultimoSabado.getDistanceKm() != null ? ultimoSabado.getDistanceKm() : 0.0;
-
-            double mediaSabados = listaSabados.stream()
-                    .limit(5)
-                    .mapToDouble(ActivitySummaryEntity::getEfficiencyIndex)
-                    .average()
-                    .orElse(0.0);
-
-            if (ultimaDistanciaKm >= 11.5 && ultimaDistanciaKm < 13.5) {
-                if (mediaSabados >= 1.08 && listaSabados.size() >= 4) {
-                    return 3;
-                }
-                return 2;
-            } else if (ultimaDistanciaKm >= 13.5 && ultimaDistanciaKm < 14.5) {
-                if (mediaSabados >= 1.06 && listaSabados.size() >= 4) {
-                    return 4;
-                }
-                return 3;
-            } else if (ultimaDistanciaKm >= 14.5 && ultimaDistanciaKm < 15.5) {
-                if (mediaSabados >= 1.04 && listaSabados.size() >= 4) {
-                    return 5;
-                }
-                return 4;
-            } else if (ultimaDistanciaKm >= 15.5) {
-                return 5;
-            }
-
-            return 2;
-        } else {
-            return 1;
-        }
-    }
-
-    private int calcularNivelDinamicoCenario2(List<ActivitySummaryEntity> historicoTiros, double mediaEficienciaTiros) {
-        if (historicoTiros.isEmpty() || historicoTiros.size() < 5) {
-            return 1;
-        }
-
-        if (mediaEficienciaTiros >= 1.15) {
-            return 5;
-        } else if (mediaEficienciaTiros >= 1.13) {
-            return 4;
-        } else if (mediaEficienciaTiros >= 1.10) {
-            return 3;
-        } else if (mediaEficienciaTiros >= 1.06) {
-            return 2;
-        }
-
+    /**
+     * Mapeia a média do Efficiency Index (últimas 5 sessões) para o Nível correspondente.
+     */
+    private int determinarNivelPorEI(double mediaEI) {
+        if (mediaEI >= 1.15) return 5;
+        if (mediaEI >= 1.10) return 4;
+        if (mediaEI >= 1.05) return 3;
+        if (mediaEI >= 1.00) return 2;
         return 1;
     }
 
@@ -135,20 +85,34 @@ public class WeeklyPlannerService {
         LocalDate quinta = hoje.with(DayOfWeek.THURSDAY);
         LocalDate sabado = hoje.with(DayOfWeek.SATURDAY);
 
+        // 1. Histórico recente de cada cenário no MySQL
         List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
         List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
 
-        List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
+        // 2. Filtra os últimos 5 treinos específicos de cada dia
+        List<ActivitySummaryEntity> ultimasTercas = listaCenario1.stream()
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
+                .limit(5).toList();
+
+        List<ActivitySummaryEntity> ultimasQuintas = listaTiros.stream()
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.THURSDAY)
+                .limit(5).toList();
+
+        List<ActivitySummaryEntity> ultimosSabados = listaCenario1.stream()
                 .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
-                .toList();
+                .limit(5).toList();
 
-        double mediaEficienciaTiros = listaTiros.stream().limit(5).mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(0.0);
+        // 3. Média de Efficiency Index das 5 sessões de cada dia
+        double mediaEI_Terca = ultimasTercas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
+        double mediaEI_Quinta = ultimasQuintas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
+        double mediaEI_Sabado = ultimosSabados.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
 
-        int nivelTerca = calcularNivelDinamicoCenario1(listaSabados, "TERÇA-FEIRA");
-        int nivelQuinta = calcularNivelDinamicoCenario2(listaTiros, mediaEficienciaTiros);
-        int nivelSabado = calcularNivelDinamicoCenario1(listaSabados, "SÁBADO");
+        // 4. Determina o nível com base puramente na média de cada dia
+        int nivelTerca  = determinarNivelPorEI(mediaEI_Terca);
+        int nivelQuinta = determinarNivelPorEI(mediaEI_Quinta);
+        int nivelSabado = determinarNivelPorEI(mediaEI_Sabado);
 
         // 🎯 BASE CIENTÍFICA NO MONGODB PASSANDO O ENUM GENDER
         String scientificContext = knowledgeService.getScientificContext(user.getGender());

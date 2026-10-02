@@ -74,7 +74,7 @@ public class InsightService {
     public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {
     }
 
-    @Transactional
+
     public String getActivityInsight(StravaActivity activity, List<StravaActivity.MinuteAnalysis> analysis) {
 
         // 1. Identifica o usuário
@@ -205,7 +205,11 @@ public class InsightService {
 
         // 8. Busca no MySQL a prescrição agendada para a data do treino de hoje
         LocalDate dataTreinoHoje = activityDate.toLocalDate();
-        Optional<WorkoutPrescriptionEntity> prescricaoHoje = workoutPrescriptionRepository.findByScheduledDate(dataTreinoHoje);
+        log.info("[INSIGHT] Data recebida: {} | Data normalizada SP: {} | LocalDate: {}",
+                dateStr, activityDate, dataTreinoHoje);
+        Optional<WorkoutPrescriptionEntity> prescricaoHoje = workoutPrescriptionRepository
+                .findByScheduledDate(dataTreinoHoje).or(() -> workoutPrescriptionRepository
+                        .findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(dataTreinoHoje));
 
         // 9. Mapeia o cenário e o nível salvando o histórico real
         int cenarioDetectado = ehTiro ? 2 : 1;
@@ -721,14 +725,29 @@ public class InsightService {
     }
 
     private ZonedDateTime parseToZonedDateTime(String dateStr) {
-        if (dateStr == null || dateStr.isEmpty()) return ZonedDateTime.now(ZONE_SP);
+        if (dateStr == null || dateStr.isBlank()) {
+            return ZonedDateTime.now(ZONE_SP);
+        }
+
         try {
-            return LocalDateTime.parse(dateStr.substring(0, 19).replace(" ", "T")).atZone(ZONE_SP);
-        } catch (Exception e) {
+            // 1. Tenta fazer o parse de strings que contêm offset ou indicador UTC 'Z' (ex: 2026-09-26T06:30:00Z)
+            return ZonedDateTime.parse(dateStr)
+                    .withZoneSameInstant(ZONE_SP); // Converte mantendo o instante real no tempo
+        } catch (Exception e1) {
             try {
-                return LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay(ZONE_SP);
-            } catch (Exception ex) {
-                return ZonedDateTime.now(ZONE_SP);
+                // 2. Fallback para OffsetDateTime (ex: 2026-09-26T06:30:00-03:00)
+                return java.time.OffsetDateTime.parse(dateStr)
+                        .atZoneSameInstant(ZONE_SP);
+            } catch (Exception e2) {
+                try {
+                    // 3. Fallback para LocalDateTime sem fuso (ex: 2026-09-26T06:30:00 ou com espaço)
+                    String normalizedDate = dateStr.length() >= 19 ? dateStr.substring(0, 19).replace(" ", "T") : dateStr;
+                    return LocalDateTime.parse(normalizedDate)
+                            .atZone(ZONE_SP); // Assume que a hora declarada já é o horário de SP
+                } catch (Exception e3) {
+                    log.warn("[DATE PARSE] Falha ao converter data '{}'. Usando data/hora atual de SP.", dateStr);
+                    return ZonedDateTime.now(ZONE_SP);
+                }
             }
         }
     }
@@ -752,7 +771,16 @@ public class InsightService {
             return java.util.Arrays.stream(trainingDaysStr.split(","))
                     .map(String::trim)
                     .map(String::toUpperCase)
-                    .map(DayOfWeek::valueOf)
+                    .map(dia -> switch (dia) {
+                        case "SEGUNDA", "SEGUNDA-FEIRA", "MONDAY" -> DayOfWeek.MONDAY;
+                        case "TERÇA", "TERCA", "TERÇA-FEIRA", "TERCA-FEIRA", "TUESDAY" -> DayOfWeek.TUESDAY;
+                        case "QUARTA", "QUARTA-FEIRA", "WEDNESDAY" -> DayOfWeek.WEDNESDAY;
+                        case "QUINTA", "QUINTA-FEIRA", "THURSDAY" -> DayOfWeek.THURSDAY;
+                        case "SEXTA", "SEXTA-FEIRA", "FRIDAY" -> DayOfWeek.FRIDAY;
+                        case "SÁBADO", "SABADO", "SATURDAY" -> DayOfWeek.SATURDAY;
+                        case "DOMINGO", "SUNDAY" -> DayOfWeek.SUNDAY;
+                        default -> DayOfWeek.valueOf(dia);
+                    })
                     .collect(Collectors.toSet());
         } catch (Exception e) {
             log.warn("[USER] Falha ao converter trainingDays ('{}'). Usando padrão Terça/Quinta/Sábado.", trainingDaysStr);

@@ -25,4 +25,4 @@ COPY --from=build /app/target/*.jar app.jar
 
 # O Cloud Run exige que a aplicação ouça na porta definida pela variável de ambiente $PORT
 EXPOSE 8080
-ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-Dserver.port=${PORT:8080}", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]

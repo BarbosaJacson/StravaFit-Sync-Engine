@@ -1,6 +1,7 @@
 package jackson.stravafit.service;
 
 import jackson.stravafit.client.TelegramClient;
+import jackson.stravafit.model.ActivityEntity;
 import jackson.stravafit.model.StravaActivity;
 import jackson.stravafit.model.TokenResponse;
 import jackson.stravafit.model.UserEntity;
@@ -15,7 +16,9 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -57,32 +60,50 @@ public class SyncScheduler {
             if (response.activities().isEmpty()) {
                 log.warn("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
                 enviarLembreteUltimoInsight();
-                return; // Retorno vazio
+                return;
             }
 
-            StravaActivity activity = response.activities().get(0);
+            // 1. Ordena todas as atividades da API do Strava da mais recente para a mais antiga
+            List<StravaActivity> atividadesOrdenadas = response.activities().stream()
+                    .sorted(Comparator.comparing(
+                            act -> parseDate(act.getStartDateLocal()),
+                            Comparator.nullsLast(Comparator.reverseOrder())
+                    ))
+                    .toList();
 
-            if (activityRepository.existsById(activity.getId())) {
-                log.info("-> Treino do dia (" + activity.getName() + ") já analisado. Acionando fallback de reenvio...");
+            // 2. Seleciona a primeira atividade mais recente que seja elegível (nova ou recente sem insight)
+            Optional<StravaActivity> treinoPendente = atividadesOrdenadas.stream()
+                    .filter(activity -> {
+                        Optional<ActivityEntity> entityOpt = activityRepository.findById(activity.getId());
+
+                        // Se for uma atividade nova que ainda não foi salva no banco -> Processa!
+                        if (entityOpt.isEmpty()) {
+                            return true;
+                        }
+
+                        // Se já existe, reprocessa apenas se for dos últimos 7 dias e estiver sem insight válido
+                        ActivityEntity entity = entityOpt.get();
+                        boolean recente = isActivityRecent(activity.getStartDateLocal(), 7);
+                        return recente && !isValidInsight(entity.getGeminiInsight());
+                    })
+                    .findFirst();
+            if (treinoPendente.isPresent()) {
+                StravaActivity activity = treinoPendente.get();
+                log.info("-> NOVO TREINO DETECTADO PARA ANÁLISE: {} (ID: {})", activity.getName(), activity.getId());
+                processarEEnviar(this.accessToken, activity);
+            } else {
+                log.info("-> Todos os treinos recentes do Strava já estão processados no MySQL. Acionando fallback...");
                 enviarLembreteUltimoInsight();
-                return; // Retorno vazio
             }
-
-            log.info("-> NOVO TREINO DETECTADO: " + activity.getName());
-            processarEEnviar(this.accessToken, activity);
-            return; // Opcional ou remova
 
         } catch (HttpClientErrorException.Unauthorized e) {
             if (renovarToken()) {
-                executarSincronizacao(); // Chamada recursiva assíncrona
-                return;
+                executarSincronizacao();
             } else {
                 log.error("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
-                return;
             }
         } catch (Exception e) {
-            log.error("ERRO NA SINCRONIZAÇÃO: " + e.getMessage());
-            return;
+            log.error("ERRO NA SINCRONIZAÇÃO: {}", e.getMessage());
         }
     }
 
@@ -147,10 +168,30 @@ public class SyncScheduler {
         }, () -> log.warn("   [FALLBACK] Nenhum treino encontrado no banco de dados para reenvio."));
     }
 
-    // Removido por completo: método encerrarAplicacaoGraciosamente()
-
     private boolean isValidInsight(String insight) {
         return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
+    }
+
+    private java.time.LocalDateTime parseDate(String dateStr) {
+        if (dateStr == null || dateStr.isBlank()) {
+            return java.time.LocalDateTime.MIN;
+        }
+        try {
+            String cleanDate = dateStr.replace("Z", "");
+            return java.time.LocalDateTime.parse(cleanDate, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (Exception e) {
+            log.warn("[SYNC] Falha ao fazer parse da data da atividade: {}", dateStr);
+            return java.time.LocalDateTime.MIN;
+        }
+    }
+
+    private boolean isActivityRecent(String dateStr, int maxDays) {
+        java.time.LocalDateTime activityDate = parseDate(dateStr);
+        if (activityDate.equals(java.time.LocalDateTime.MIN)) {
+            return false;
+        }
+        java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(maxDays);
+        return activityDate.isAfter(cutoffDate);
     }
 
     private boolean renovarToken() {
@@ -165,4 +206,3 @@ public class SyncScheduler {
         }
     }
 }
-

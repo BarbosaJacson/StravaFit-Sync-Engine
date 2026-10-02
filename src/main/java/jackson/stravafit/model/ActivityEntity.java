@@ -32,7 +32,6 @@ public class ActivityEntity {
     public ActivityEntity() {
     }
 
-    // Construtor completo
     public ActivityEntity(Long id, String name, String startDate, Double distanceKm, Double averageHeartRate, Double maxHeartRate, String sportType, String dominantZone, Integer totalTimeMinutes, String geminiInsight, List<MinuteAnalysisEntity> minuteDetails) {
         this.id = id;
         this.name = name;
@@ -47,7 +46,6 @@ public class ActivityEntity {
         this.minuteDetails = minuteDetails != null ? new ArrayList<>(minuteDetails) : new ArrayList<>();
     }
 
-    // Getters
     public Long getId() {
         return id;
     }
@@ -92,7 +90,6 @@ public class ActivityEntity {
         return minuteDetails;
     }
 
-    // Setters
     public void setId(Long id) {
         this.id = id;
     }

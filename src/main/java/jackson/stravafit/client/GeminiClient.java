@@ -24,7 +24,7 @@ public class GeminiClient {
 
     public GeminiClient(RestClient.Builder builder, 
                         @Value("${gemini.api.key}") String apiKey,
-                        @Value("${gemini.models.list:gemini-1.5-flash}") String modelsConfig) {
+                        @Value("${gemini.models.list:gemini-3.6-flash}") String modelsConfig) {
         // 1. Criamos a fábrica definindo a paciência de 5 minutos (300000ms) para ler os dados
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setReadTimeout(300000);
