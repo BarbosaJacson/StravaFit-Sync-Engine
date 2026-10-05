@@ -1,0 +1,572 @@
+{
+  _id: 'atleta_profile_male',
+  gender: 'MALE',
+  documento_tipo: 'MATRIZ_FISIOLOGICA_MASCULINA',
+  configuracao_fisiologica: {
+    fator_recuperacao_basal: 'Padrão masculino - menor variação hormonal cíclica e estabilidade metabólica linear.',
+    tolerancia_carga_alta: 'Maior tolerância a volume semanal acumulado e densidade de treinos de tiro (Z4/Z5).',
+    metodo_calculo_zonas_padrao: 'Fórmula de Karvonen (Frequência Cardíaca de Reserva - FCR)'
+  },
+  diretrizes_metodologicas: {
+    alternancia_estagios: 'Intercalar dias de alta intensidade (Cenário 2 - Tiros) com dias de rodagem leve/recuperativa (Cenário 1 - Z2/FatMax) e descanso total.',
+    frequencia_semanal_recomendada: '3 a 4 sessões semanais'
+  },
+  fase_iniciante: {
+    ativo: true,
+    descricao: 'Fase de adaptação neuromuscular, cardiovascular e articular para homens iniciantes na corrida.',
+    regra_frequencia: 'Máximo 3 treinos por semana intercalados com dias de descanso total.',
+    zonas_alvo_prioritarias: [
+      'Z1',
+      'Z2'
+    ],
+    instrucao_ia: 'Se a flag de iniciante do usuário for verdadeira, limite o volume semanal total a no máximo 20km e evite prescrições de tiros em Z5 nas primeiras 6 semanas.'
+  }
+}
+
+{
+  _id: 'cenario_1_aerobico',
+  cenarioId: NumberInt('1'),
+  titulo: 'EFICIÊNCIA METABÓLICA - ZONA 2 PREDOMINANTE - (FATMAX)',
+  zona_cardiaca_alvo: 'Z2',
+  faixa_bpm: '125-139',
+  regra_aplicabilidade: {
+    criterio_ativacao: 'O cenário só será considerado ATIVO e aplicável se o treino analisado for uma rodagem contínua ou treino longo aeróbico.',
+    estabilidade_ritmo_exigida: 'Desvio padrão da frequência cardíaca baixo (abaixo de 6.0 bpm), indicando ritmo constante e acoplamento cardiovascular estável.'
+  },
+  regras_de_execucao_e_progressao_por_nivel: [
+    {
+      nivel: NumberInt('1'),
+      descricao: 'Rodagem de desenvolvimento, manutenção e âncora de recuperação (Terça-Feira). Consolidação da base aeróbica primária e controle rigoroso de carga semanal.',
+      faixa_distancia_km: '7.0 km a 10.0 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N1-V1: REGENERATIVO / RECOMPOSIÇÃO',
+          volume_km: NumberInt('7'),
+          tempo_min_minutos: NumberInt('45'),
+          tempo_max_minutos: NumberInt('55'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 1.010 ou em semanas pós-estresse acentuado. Foco em circulação e recuperação metabólica sem acúmulo de fadiga.'
+        },
+        {
+          variacao: 'N1-V2: MANUTENÇÃO AERÓBICA BASE',
+          volume_km: NumberInt('8'),
+          tempo_min_minutos: NumberInt('52'),
+          tempo_max_minutos: NumberInt('62'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.010 e 1.029. Volume clássico de rodagem leve de início de microciclo.'
+        },
+        {
+          variacao: 'N1-V3: RITMO E EFICIÊNCIA CONTINUADA',
+          volume_km: NumberInt('9'),
+          tempo_min_minutos: NumberInt('58'),
+          tempo_max_minutos: NumberInt('70'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.030 e 1.049. Expande o tempo total de oxidação lipídica (FatMax).'
+        },
+        {
+          variacao: 'N1-V4: CONSOLIDAÇÃO DO TETO BASE',
+          volume_km: NumberInt('10'),
+          tempo_min_minutos: NumberInt('65'),
+          tempo_max_minutos: NumberInt('77'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for >= 1.050. Teto do Nível 1 atingido com altíssima eficiência metabólica.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.05'),
+          sessoes_consecutivas_exigidas: NumberInt('4')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 1.050 por pelo menos 4 sessões consecutivas de sábado consolida a promoção para o Nível 2.'
+      }
+    },
+    {
+      nivel: NumberInt('2'),
+      descricao: 'Volume intermediário de endurance e consolidação do bloco de 12 km. Foco no acoplamento celular e estabilização de pace drift.',
+      faixa_distancia_km: '11.0 km a 12.5 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N2-V1: TRANSIÇÃO DE ENTRADA (11 KM)',
+          volume_km: NumberInt('11'),
+          tempo_min_minutos: NumberInt('71'),
+          tempo_max_minutos: NumberInt('82'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 1.000. Transição suave do Nível 1 para adaptar a estrutura articular aos 11 km.'
+        },
+        {
+          variacao: 'N2-V2: BLOCO BASE DE 12 KM',
+          volume_km: NumberInt('12'),
+          tempo_min_minutos: NumberInt('78'),
+          tempo_max_minutos: NumberInt('87'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.000 e 1.014. Volume padrão do nível atual para adaptação de resistência básica.'
+        },
+        {
+          variacao: 'N2-V3: ESTABILIZAÇÃO DE DRIFT CARDÍACO',
+          volume_km: NumberInt('12'),
+          tempo_min_minutos: NumberInt('76'),
+          tempo_max_minutos: NumberInt('85'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.015 e 1.029. Mantém os 12 km exigindo maior constância de ritmo e menor desvio padrão de FC.'
+        },
+        {
+          variacao: 'N2-V4: EXPANSÃO DE BORDA (12.5 KM)',
+          volume_km: Double('12.5'),
+          tempo_min_minutos: NumberInt('80'),
+          tempo_max_minutos: NumberInt('90'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.030 e 1.039 (pré-gatilho de promoção). Adiciona 500 metros como rampa de transição para os 13/14 km.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.03'),
+          sessoes_consecutivas_exigidas: NumberInt('4')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 1.030 por 4 sessões consecutivas de longão de sábado promove o atleta ao Nível 3 (14 km).'
+      }
+    },
+    {
+      nivel: NumberInt('3'),
+      descricao: 'Sustentação aeróbica avançada e transição crítica para 14 km. Adaptação de ritmo sob estresse de glicogênio de longa duração (85 a 105 min).',
+      faixa_distancia_km: '13.0 km a 14.5 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N3-V1: PONTE METABÓLICA (13 KM)',
+          volume_km: NumberInt('13'),
+          tempo_min_minutos: NumberInt('84'),
+          tempo_max_minutos: NumberInt('95'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 0.990 após a promoção. Evita o salto direto para 14 km, testando a resposta fisiológica em 13 km.'
+        },
+        {
+          variacao: 'N3-V2: META DO NÍVEL (14 KM CONSOLIDADO)',
+          volume_km: NumberInt('14'),
+          tempo_min_minutos: NumberInt('91'),
+          tempo_max_minutos: NumberInt('102'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 0.990 e 1.004. Bate o volume de 14 km com foco na manutenção da cadência e FC em Z2.'
+        },
+        {
+          variacao: 'N3-V3: DENSIDADE DE ENDURANCE (14 KM EXIGENTE)',
+          volume_km: NumberInt('14'),
+          tempo_min_minutos: NumberInt('88'),
+          tempo_max_minutos: NumberInt('98'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.005 e 1.014. Mantém 14 km otimizando a economia de corrida para reduzir o tempo total de prova.'
+        },
+        {
+          variacao: 'N3-V4: EXPANSÃO PRÉ-15 KM (14.5 KM)',
+          volume_km: Double('14.5'),
+          tempo_min_minutos: NumberInt('93'),
+          tempo_max_minutos: NumberInt('104'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for >= 1.015. Teto do Nível 3 preparando a transição biomecânica para o Nível 4.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.01'),
+          sessoes_consecutivas_exigidas: NumberInt('4')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 1.010 por 4 sessões consecutivas em 14 km promove ao Nível 4 (15 km).'
+      }
+    },
+    {
+      nivel: NumberInt('4'),
+      descricao: 'Endurance aeróbica crítica (15 km). Depleção acentuada de glicogênio e gestão do teto de carga do microciclo.',
+      faixa_distancia_km: '14.5 km a 15.5 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N4-V1: AMORTECIMENTO DE CARGA (14.5 KM)',
+          volume_km: Double('14.5'),
+          tempo_min_minutos: NumberInt('94'),
+          tempo_max_minutos: NumberInt('105'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 0.970. Reajusta a carga inicial do Nível 4 sem comprometer as articulações.'
+        },
+        {
+          variacao: 'N4-V2: BASE DE ENDURANCE CRÍTICA (15 KM)',
+          volume_km: NumberInt('15'),
+          tempo_min_minutos: NumberInt('97'),
+          tempo_max_minutos: NumberInt('109'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 0.970 e 0.979. Consolidação dos 15 km com controle estrito do acoplamento neuromuscular.'
+        },
+        {
+          variacao: 'N4-V3: EFICIÊNCIA DE LONGÃO (15 KM OPTIMA)',
+          volume_km: NumberInt('15'),
+          tempo_min_minutos: NumberInt('95'),
+          tempo_max_minutos: NumberInt('105'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 0.980 e 0.989. Aumenta a velocidade metabólica mantendo a frequência cardíaca travada em Z2.'
+        },
+        {
+          variacao: 'N4-V4: RETA FINAL DE ENDURANCE (15.5 KM)',
+          volume_km: Double('15.5'),
+          tempo_min_minutos: NumberInt('100'),
+          tempo_max_minutos: NumberInt('112'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for >= 0.990. Teste definitivo de resiliência antes do teto de 16 km.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('0.99'),
+          sessoes_consecutivas_exigidas: NumberInt('4')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 0.990 por 4 sessões consecutivas promove ao Nível 5 (Teto do Ciclo de 16 km).'
+      }
+    },
+    {
+      nivel: NumberInt('5'),
+      descricao: 'Teto Máximo do ciclo de treinos para a Meia Maratona (16 km). Máxima solicitação de oxidação de gorduras e simulação real de ritmo de prova.',
+      faixa_distancia_km: '15.5 km a 16.5 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N5-V1: ENTRADA NO TETO (15.5 KM)',
+          volume_km: Double('15.5'),
+          tempo_min_minutos: NumberInt('100'),
+          tempo_max_minutos: NumberInt('112'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 0.950 e 0.959. Estabilização do atleta no limiar inicial de pico.'
+        },
+        {
+          variacao: 'N5-V2: TETO ABSOLUTO DO CICLO (16 KM)',
+          volume_km: NumberInt('16'),
+          tempo_min_minutos: NumberInt('104'),
+          tempo_max_minutos: NumberInt('116'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 0.960 e 0.969. Marca máxima planejada para o ciclo de preparação da Meia Maratona.'
+        },
+        {
+          variacao: 'N5-V3: SIMULAÇÃO DE PROVA (16.5 KM)',
+          volume_km: Double('16.5'),
+          tempo_min_minutos: NumberInt('107'),
+          tempo_max_minutos: NumberInt('119'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 0.970 e 0.979. Máximo estresse volumétrico permitido com suporte nutricional e de hidratação pleno.'
+        },
+        {
+          variacao: 'N5-V4: REFINAMENTO E POLIMENTO (TAPERING PRÉ-PROVA)',
+          volume_km: NumberInt('12'),
+          tempo_min_minutos: NumberInt('78'),
+          tempo_max_minutos: NumberInt('85'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for >= 0.980 nas semanas que antecedem a Meia Maratona de 01/11/2026. Reduz o volume para descanso muscular sem perder a eficiência.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('0.97'),
+          sessoes_consecutivas_exigidas: NumberInt('4')
+        },
+        criterio: 'Atleta atingiu o teto volumétrico e metabólico do ciclo de treino para a Meia Maratona.'
+      }
+    }
+  ]
+}
+
+
+{
+  _id: 'cenario_2_anaerobico_tiros',
+  cenarioId: NumberInt('2'),
+  titulo: 'INTENSIFICAÇÃO - CAPACIDADE ANAERÓBICA E VO2MÁX - (TIROS EM Z3/Z4)',
+  zona_cardiaca_alvo: 'Z3-Z4',
+  faixa_bpm: '140-160',
+  regra_aplicabilidade: {
+    criterio_ativacao: 'O cenário só será considerado ATIVO e aplicável se o treino analisado for uma sessão fracionada de alta intensidade (intervalados/tiros).',
+    estabilidade_ritmo_exigida: 'Flutuação controlada de frequência cardíaca com picos em Z3/Z4 durante os tiros e recuperação rápida na caminhada/trote.'
+  },
+  regras_de_execucao_e_progressao_por_nivel: [
+    {
+      nivel: NumberInt('1'),
+      descricao: 'Introdução e adaptação neuromuscular. Foco na cadência, eficiência metabólica e introdução ao estresse fracionado de tiro curto/médio.',
+      faixa_repeticoes: '4 a 6 tiros',
+      volume_estimado_km: '4.0 a 5.0 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N1-V1: ADAPTAÇÃO BÁSICA',
+          repeticoes: NumberInt('4'),
+          tempo_tiro: '1:00',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: NumberInt('4'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 1.050. Foco em introduzir o estímulo sem acúmulo excessivo de acidose.'
+        },
+        {
+          variacao: 'N1-V2: DENSIDADE DE RITMO',
+          repeticoes: NumberInt('5'),
+          tempo_tiro: '1:00',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('4.3'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.050 e 1.065. Reduz o descanso para acelerar a depuração de lactato.'
+        },
+        {
+          variacao: 'N1-V3: PROGRESSÃO TEMPORAL (1:15)',
+          repeticoes: NumberInt('5'),
+          tempo_tiro: '1:15',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('4.6'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.066 e 1.079. Expande o tempo de tiro para 1min15s.'
+        },
+        {
+          variacao: 'N1-V4: CONSOLIDAÇÃO DO NÍVEL (1:30)',
+          repeticoes: NumberInt('6'),
+          tempo_tiro: '1:30',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: NumberInt('5'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.080 e 1.099. Teto do Nível 1 com 6 tiros de 1min30s.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.1'),
+          sessoes_consecutivas_exigidas: NumberInt('3')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 1.100 por 3 sessões consecutivas promove ao Nível 2.'
+      }
+    },
+    {
+      nivel: NumberInt('2'),
+      descricao: 'Volume base e expansão do tempo sob tensão anaeróbica. Introdução gradual a tiros de 1:45 para estímulo inicial de VO2máx.',
+      faixa_repeticoes: '6 a 8 tiros',
+      volume_estimado_km: '5.0 a 6.2 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N2-V1: BASE TEMPORAL (1:15)',
+          repeticoes: NumberInt('6'),
+          tempo_tiro: '1:15',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: NumberInt('5'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 1.060. Transição do Nível 1 mantendo 6 repetições.'
+        },
+        {
+          variacao: 'N2-V2: DENSIDADE DE PAUSA',
+          repeticoes: NumberInt('7'),
+          tempo_tiro: '1:15',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('5.4'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.060 e 1.074. Eleva para 7 tiros comprimindo a pausa.'
+        },
+        {
+          variacao: 'N2-V3: EXPANSÃO PARA 1:30',
+          repeticoes: NumberInt('8'),
+          tempo_tiro: '1:30',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: Double('5.8'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.075 e 1.089. Consolida 8 tiros de 1min30s.'
+        },
+        {
+          variacao: 'N2-V4: EXTENSÃO INICIAL DE VO2MÁX (1:45)',
+          repeticoes: NumberInt('8'),
+          tempo_tiro: '1:45',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: Double('6.2'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.090 e 1.099. Aplica 8 tiros de 1min45s estimulando o consumo sustentado de O2.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.1'),
+          sessoes_consecutivas_exigidas: NumberInt('3')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 1.100 por 3 sessões consecutivas promove ao Nível 3.'
+      }
+    },
+    {
+      nivel: NumberInt('3'),
+      descricao: 'Intensificação de tempo sob estresse e consolidação do teto volumétrico padrão (8 a 10 tiros de 1:30 a 2:00).',
+      faixa_repeticoes: '8 a 10 tiros',
+      volume_estimado_km: '6.2 a 7.2 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N3-V1: CONSOLIDAÇÃO DE 1:30',
+          repeticoes: NumberInt('8'),
+          tempo_tiro: '1:30',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('6.2'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 1.100. Padrão denso de 8 tiros de 1min30s.'
+        },
+        {
+          variacao: 'N3-V2: TRANSIÇÃO PARA 1:45',
+          repeticoes: NumberInt('8'),
+          tempo_tiro: '1:45',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('6.5'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.100 e 1.114. Eleva a duração do tiro para 1min45s com pausa curta.'
+        },
+        {
+          variacao: 'N3-V3: EXPANSÃO VOLUMÉTRICA (9 TIROS)',
+          repeticoes: NumberInt('9'),
+          tempo_tiro: '1:45',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('6.8'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.115 e 1.124. Incrementa para 9 repetições de 1min45s.'
+        },
+        {
+          variacao: 'N3-V4: ENTRADA NA ZONA DE 2:00 (VO2MÁX SUSTENTADO)',
+          repeticoes: NumberInt('10'),
+          tempo_tiro: '2:00',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: Double('7.2'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.125 e 1.129. Ativa 10 tiros completos de 2 minutos para alta solicitação aeróbica.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.13'),
+          sessoes_consecutivas_exigidas: NumberInt('3')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 1.130 por 3 sessões consecutivas promove ao Nível 4.'
+      }
+    },
+    {
+      nivel: NumberInt('4'),
+      descricao: 'Resistência de velocidade em tiros longos (1:45 a 2:30). Foco em maximizar o tempo acumulado no pico do VO2máx.',
+      faixa_repeticoes: '8 a 10 tiros longos',
+      volume_estimado_km: '7.0 a 8.2 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N4-V1: TIROS LONGOS DENSO (1:45)',
+          repeticoes: NumberInt('10'),
+          tempo_tiro: '1:45',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: NumberInt('7'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for < 1.130. 10 tiros de 1min45s com pausa estrita.'
+        },
+        {
+          variacao: 'N4-V2: ESTRESSE SUSTENTADO DE VO2MÁX (2:00)',
+          repeticoes: NumberInt('10'),
+          tempo_tiro: '2:00',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: Double('7.5'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.130 e 1.139. 10 repetições de 2 minutos cravados em Z3/Z4.'
+        },
+        {
+          variacao: 'N4-V3: PROGRESSÃO PARA 2:15',
+          repeticoes: NumberInt('9'),
+          tempo_tiro: '2:15',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: Double('7.8'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.140 e 1.149. Ajusta para 9 tiros mais extensos de 2min15s.'
+        },
+        {
+          variacao: 'N4-V4: AMPLITUDE DE POTÊNCIA (2:30)',
+          repeticoes: NumberInt('10'),
+          tempo_tiro: '2:30',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: Double('8.2'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.150 e 1.159. Teto do Nível 4 com 10 tiros de 2min30s.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.16'),
+          sessoes_consecutivas_exigidas: NumberInt('3')
+        },
+        criterio: 'Efficiency Index médio mantido em >= 1.160 por 3 sessões consecutivas promove ao Nível 5 (Pico Absoluto de VO2máx).'
+      }
+    },
+    {
+      nivel: NumberInt('5'),
+      descricao: 'Teto Máximo de potência e sustentação aeróbica em tiros extensos (2:00 a 2:45). Máxima tolerância de lactato e simulação de ritmo de prova.',
+      faixa_repeticoes: '8 a 10 tiros extensos',
+      volume_estimado_km: '8.0 a 9.0 km',
+      variacoes_estimulo: [
+        {
+          variacao: 'N5-V1: DENSIDADE DE 2:00 (PAUSA 1:00)',
+          repeticoes: NumberInt('10'),
+          tempo_tiro: '2:00',
+          tempo_recuperacao: '1:00',
+          volume_estimado_km: NumberInt('8'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.160 e 1.169. 10 tiros de 2 minutos com pausa densa de apenas 1 min.'
+        },
+        {
+          variacao: 'N5-V2: POTÊNCIA EXTENSA DE 2:15',
+          repeticoes: NumberInt('10'),
+          tempo_tiro: '2:15',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('8.3'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.170 e 1.179. 10 tiros de 2min15s sustentando alta oxidação.'
+        },
+        {
+          variacao: 'N5-V3: PICO DE VO2MÁX (2:30)',
+          repeticoes: NumberInt('9'),
+          tempo_tiro: '2:30',
+          tempo_recuperacao: '1:15',
+          volume_estimado_km: Double('8.6'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio estiver entre 1.180 e 1.189. 9 tiros longos de 2min30s em limiar anaeróbico superior.'
+        },
+        {
+          variacao: 'N5-V4: TETO ABSOLUTO DE SUSTENTAÇÃO (2:45)',
+          repeticoes: NumberInt('10'),
+          tempo_tiro: '2:45',
+          tempo_recuperacao: '1:30',
+          volume_estimado_km: NumberInt('9'),
+          criterio_ia: 'Selecionado se o Efficiency Index médio for >= 1.190. Teto máximo de estresse de VO2máx com 10 tiros de 2min45s antes do polimento para a prova.'
+        }
+      ],
+      gatilho_promocao: {
+        metric_alvo: 'efficiency_index',
+        faixa_eficiencia: {
+          min_sustentada: Double('1.19'),
+          sessoes_consecutivas_exigidas: NumberInt('3')
+        },
+        criterio: 'Atleta atingiu o teto metabólico absoluto do modelo (Nível 5). Mantém refinamento e preparação para a Meia Maratona.'
+      }
+    }
+  ]
+}
+
+{
+  "_id": "macro_ciclo_meia_maratona_2026",
+  "documento_tipo": "DIRETRIZ_PROVA_ALVO",
+  "evento": "Meia Maratona (21.097 km)",
+  "data_evento": "2026-10-31",
+  "diretrizes_fase_final": {
+    "semanas_restantes_4_a_3": {
+      "fase": "PICO DE CARGA E CONSOLIDAÇÃO",
+      "foco_longao": "Sustentação do volume teto progressivo em Z2 pura conforme variação ativa do Nível 5.",
+      "fortalecimento_e_prevencao": "Treinos de força específicos para cadência e estabilização de quadril/joelho (glúteo médio e sóleo).",
+      "foco_mental": "Construção de disciplina de ritmo em Z2 sem ceder à tentação de acelerar no início."
+    },
+    "semanas_restantes_2_a_1": {
+      "fase": "POLIMENTO E REFINAMENTO (TAPERING)",
+      "foco_volume": "Redução progressiva do volume semanal total mantendo a intensidade das zonas cardíacas.",
+      "cuidados_fisiologicos": "Foco em regeneração tecidual, supercompensação de glicogênio e profilaxia de lesões articulares."
+    }
+  },
+  "diretrizes_pre_prova": {
+    "estratégia_pace": "Pace progressivo sustentado (Negative Split leve) ancorado pela Frequência Cardíaca de Z2/Z3 inicial.",
+    "alongamento_e_mobilidade": "Mobilidade dinâmica de tornozelo e flexores de quadril pós-treino; liberação miofascial leve."
+  }
+}
+
+{
+  _id: 'evento_meia_maratona_2026',
+  documento_tipo: 'CONFIGURACAO_PROVA_ALVO',
+  evento: {
+    nome: 'Meia Maratona de Feira de Santana',
+    data_evento: '2026-10-31',
+    distancia_oficial_km: Double('21.097')
+  },
+  estrategia_pacing_e_zonas: {
+    km_0_a_5: {
+      fase: 'CONTROLE INICIAL E AQUECIMENTO DE PROVA',
+      zona_alvo: 'Z2 (Aeróbica / FatMax)',
+      pace_alvo_sugerido_min_km: '6:25 - 6:35',
+      faixa_bpm_orientativa: '125-139 bpm'
+    },
+    km_5_a_15: {
+      fase: 'CRUZEIRO DE ENDURANCE E RITMO SUSTENTADO',
+      zona_alvo: 'Transição Z2 para Z3',
+      pace_alvo_sugerido_min_km: '6:10 - 6:20',
+      faixa_bpm_orientativa: '138-148 bpm'
+    },
+    km_15_a_21: {
+      fase: 'RETA FINAL / NEGATIVE SPLIT CONTROLADO',
+      zona_alvo: 'Z3 superior atingindo Z4',
+      pace_alvo_sugerido_min_km: '5:55 - 6:05',
+      faixa_bpm_orientativa: '148-162 bpm'
+    }
+  },
+  parametros_calculo_dinamico_ia: {
+    fonte_dados: 'activity_performance_summary',
+    metricas_chaves_leitura: [
+      'efficiency_index',
+      'average_heart_rate',
+      'distance_km',
+      'total_time_minutes'
+    ],
+    instrucao_pace_prova: 'Projetar o tempo total da prova multiplicando o Pace Médio histórico das últimas sessões de Nível 4/5 do cenario_1_aerobico pela distância de 21.097 km.'
+  }
+}

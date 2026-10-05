@@ -167,7 +167,10 @@ public class InsightService {
 
         // Busca no MySQL a prescrição agendada para o próximo treino (Terça, Quinta ou Sábado)
         LocalDate dataProximo = parseNextWorkoutDate(proximoTreinoData);
-        Optional<WorkoutPrescriptionEntity> proximaPrescricao = workoutPrescriptionRepository.findByScheduledDate(dataProximo);
+        // Garantir que o tipo retornado seja Optional
+        // Garanta que NÃO haja .orElse(null) no final desta linha:
+        Optional<WorkoutPrescriptionEntity> proximaPrescricao =
+                workoutPrescriptionRepository.findByScheduledDate(dataProximo);
 
         // Busca o último nível gravado no MySQL pela WeeklyPlannerService para cada cenário
         int nivelAtualCenario1 = workoutPrescriptionRepository
@@ -208,7 +211,8 @@ public class InsightService {
         log.info("[INSIGHT] Data recebida: {} | Data normalizada SP: {} | LocalDate: {}",
                 dateStr, activityDate, dataTreinoHoje);
         Optional<WorkoutPrescriptionEntity> prescricaoHoje = workoutPrescriptionRepository
-                .findByScheduledDate(dataTreinoHoje).or(() -> workoutPrescriptionRepository
+                .findTopByScheduledDateOrderByCreatedAtDesc(dataTreinoHoje)
+                .or(() -> workoutPrescriptionRepository
                         .findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(dataTreinoHoje));
 
         // 9. Mapeia o cenário e o nível salvando o histórico real
@@ -245,11 +249,24 @@ public class InsightService {
         String historicoPerformanceGlobal = sbHistoricoGlobal.toString();
 
         // 11. Passamos o prompt estruturado com todas as variáveis instanciadas e o 'user'
-        String prompt = buildProfessionalPrompt(user, name, metrics, activityDate, proximoTreinoData,
-                prescricaoAnterior.orElse(null), proximaPrescricao.orElse(null),
-                nivelAtualCenario1, nivelAtualCenario2, tipoEstimuloReal, janelasInstaveis,
-                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo,
-                historicoPerformanceGlobal, climaHeader);
+        String prompt = buildProfessionalPrompt(
+                user,
+                name,
+                metrics,
+                activityDate,
+                proximoTreinoData,
+                prescricaoAnterior.orElse(null),
+                proximaPrescricao.orElse(null), // 👈 Mantenha apenas UMA chamada de .orElse(null)
+                nivelAtualCenario1,
+                nivelAtualCenario2,
+                tipoEstimuloReal,
+                janelasInstaveis,
+                mediaEficienciaTiros,
+                mediaEficienciaZ2Curto,
+                mediaEficienciaZ2Longo,
+                historicoPerformanceGlobal,
+                climaHeader
+        );
 
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
@@ -258,6 +275,7 @@ public class InsightService {
         // 12. Persiste os dados técnicos calculados oficialmente no MySQL
         self.persistirDadosTecnicos(activityId, user.getId(), activityDate, metrics, cleanResult, rawAiResponse, tipoEstimuloReal, cenarioDetectado, nivelDetectado);
         return sanitizeOutput(cleanResult);
+
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -365,6 +383,15 @@ public class InsightService {
         double histEfficiencyIndex = historico.stream().filter(a -> a.getDistanceKm() != null && a.getDistanceKm() > 0 && a.getAverageHeartRate() != null && a.getAverageHeartRate() > 0 && a.getTotalTimeMinutes() != null && a.getTotalTimeMinutes() > 0).mapToDouble(a -> (a.getDistanceKm() * 1000) / (a.getAverageHeartRate() * a.getTotalTimeMinutes())).average().orElse(0.0);
 
         StringBuilder sb = new StringBuilder();
+
+        // Data Fixa da Prova Alvo (Meia Maratona 2026)
+        LocalDate dataProvaAlvo = LocalDate.of(2026, 10, 31);
+        LocalDate dataTreinoAtual = date.toLocalDate();
+
+        // Cálculo de dias e semanas restantes
+        long diasRestantes = java.time.temporal.ChronoUnit.DAYS.between(dataTreinoAtual, dataProvaAlvo);
+        long semanasRestantes = (diasRestantes > 0) ? (diasRestantes / 7) + 1 : 0;
+
 
         sb.append("VOCÊ É O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
         sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO, PRESCREVER A RECUPERAÇÃO E GERAR O PRÓXIMO TREINO.\n\n");
@@ -495,11 +522,27 @@ public class InsightService {
         sb.append("• Cite formalmente os autores do MongoDB (Casanova et al., San-Millán & Brooks, Seiler).\n");
         sb.append("• É ESTRITAMENTE PROIBIDO citar desvio padrão em bpm, picos intervalados ou oscilação de ritmo nesta seção.\n\n");
 
-        sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO (");
+        sb.append("3.0 - 🫀 ANÁLISE DE RITMO E COMPORTAMENTO CARDÍACO:\n");
         sb.append("[FOCO EXCLUSIVO: DINÂMICA TEMPORAL, CARDÍACA, PACE DRIFT E EFICIÊNCIA]\n");
-        sb.append("• Use o nome do atleta e desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
+        sb.append("• Use o nome do atleta (").append(nomeAtletaReal).append(") e desenvolva a análise focando na estabilidade do ritmo e na curva da Frequência Cardíaca ao longo do tempo.\n");
         sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO AMBIENTAL (CLIMA E ALTIMETRIA):\n");
-        sb.append("• ANÁLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
+        sb.append("  - Condições Climáticas: ").append(climaHeader).append("\n");
+        sb.append("  - Altimetria Acumulada: +").append(String.format("%.0f", metrics.ganhoAlt())).append("m / -").append(String.format("%.0f", Math.abs(metrics.perdaAlt()))).append("m\n");
+        sb.append("  - Variação em Circuito: ").append(String.format("%.0f", metrics.ganhoAlt() + Math.abs(metrics.perdaAlt()))).append("m\n");
+        sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" janelas instáveis identificadas pelo sistema.\n");
+        sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n\n");
+
+        sb.append("3.5 - 🎯 AVALIAÇÃO DE PRONTIDÃO E PREPARO PARA A MEIA MARATONA (31/10/2026):\n");
+        sb.append("[FOCO EXCLUSIVO: ANÁLISE DE PRONTIDÃO, PREVENÇÃO DE LESÕES E ESTRATÉGIA DE PROVA]\n");
+        sb.append("• CONTAGEM REGRESSIVA OFICIAL: Faltam exatamente ").append(diasRestantes).append(" dias (aprox. ")
+                .append(semanasRestantes).append(" semanas) para a Meia Maratona de 31/10/2026.\n");
+        sb.append("• Consulte no contexto do MongoDB o documento 'macro_ciclo_meia_maratona_2026' ou 'DIRETRIZ_PROVA_ALVO' correspondente à fase atual (Faltam ").append(diasRestantes).append(" dias).\n");
+        sb.append("• Com base no treino executado HOJE por ").append(nomeAtletaReal).append(" (Pace: ").append(metrics.paceFormatted())
+                .append(", FC Média: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm, Efficiency Index: ")
+                .append(String.format("%.3f", metrics.efficiencyIndex())).append("), desenvolva uma análise cobrindo obrigatoriamente:\n");
+        sb.append("  1. PRONTIDÃO E PACE DE PROVA: Avaliação da capacidade de sustentar os 21.1 km com a economia de corrida demonstrada hoje.\n");
+        sb.append("  2. PRESERVAÇÃO MUSCULAR E PREVENÇÃO DE LESÕES: Orientações práticas de fortalecimento (foco em sóleo, quadríceps e visualização de estabilização) e alongamentos pós-treino.\n");
+        sb.append("  3. FOCO MENTAL E DETERMINAÇÃO: Instrução tática para controle de ansiedade, gestão de ritmo e disciplina de pace em Z2.\n\n");
 
        sb.append("  - DIRETRIZ DE IMPACTO AMBIENTAL: Em casos de STATUS [CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO] ou desempenho excepcional/abaixo do esperado, analise OBRIGATORIAMENTE o impacto direto do ganho/perda de elevação e das condições climáticas sobre o ritmo, fadiga e frequência cardíaca do atleta, utilizando os dados abaixo:\n")
                 .append("     Condições Climáticas: ").append(climaHeader).append("\n")
@@ -535,6 +578,7 @@ public class InsightService {
         sb.append("5.0 - 🍽️ NUTRIÇÃO / DESCANSO 💤\n");
         sb.append("[Prescreva a estratégia detalhada de alimentação pré/pós treino e janelas de repouso conforme as diretrizes do MongoDB para o tipo de treino realizado HOJE. Se foi Z2 use 'light_moderated_days', se foi Tiros use 'high_intensity_days']\n\n");
 
+        // Em InsightService.java (no método buildProfessionalPrompt):
         sb.append("6.0 - 📅 PRESCRIÇÃO STRAFIT PREDICT:\n\n");
         sb.append("PRÓXIMO TREINO: ").append(proximoTreinoData.toUpperCase()).append("\n\n");
 
@@ -547,9 +591,9 @@ public class InsightService {
             sb.append("INTENSIDADE: ").append(proximaPrescricao.getIntensity()).append("\n");
             sb.append("MÉTODO: ").append(proximaPrescricao.getMethod()).append("\n\n");
         } else {
+            // Fallback: orienta a IA caso não haja prescrição agendada no MySQL
             sb.append("A prescrição para o próximo treino será atualizada pelo planejamento semanal na próxima segunda-feira.\n\n");
         }
-
         sb.append("--- INSTRUÇÃO TÉCNICA DO SISTEMA ---\n");
         sb.append("Ao final do relatório, adicione OBRIGATORIAMENTE o bloco XML abaixo UMA ÚNICA VEZ:\n");
         sb.append("<prescription_data>\n");
@@ -730,23 +774,28 @@ public class InsightService {
         }
 
         try {
-            // 1. Tenta fazer o parse de strings que contêm offset ou indicador UTC 'Z' (ex: 2026-09-26T06:30:00Z)
-            return ZonedDateTime.parse(dateStr)
-                    .withZoneSameInstant(ZONE_SP); // Converte mantendo o instante real no tempo
+            // 1. Tenta ISO ZonedDateTime pleno (ex: 2026-10-03T06:00:00Z ou com offset)
+            return ZonedDateTime.parse(dateStr).withZoneSameInstant(ZONE_SP);
         } catch (Exception e1) {
             try {
-                // 2. Fallback para OffsetDateTime (ex: 2026-09-26T06:30:00-03:00)
-                return java.time.OffsetDateTime.parse(dateStr)
-                        .atZoneSameInstant(ZONE_SP);
+                // 2. Tenta OffsetDateTime
+                return java.time.OffsetDateTime.parse(dateStr).atZoneSameInstant(ZONE_SP);
             } catch (Exception e2) {
                 try {
-                    // 3. Fallback para LocalDateTime sem fuso (ex: 2026-09-26T06:30:00 ou com espaço)
-                    String normalizedDate = dateStr.length() >= 19 ? dateStr.substring(0, 19).replace(" ", "T") : dateStr;
-                    return LocalDateTime.parse(normalizedDate)
-                            .atZone(ZONE_SP); // Assume que a hora declarada já é o horário de SP
+                    // 3. Tenta Instant forçando o indicador 'Z' se omitido
+                    String utcStr = dateStr.endsWith("Z") ? dateStr : dateStr + "Z";
+                    return java.time.Instant.parse(utcStr).atZone(ZONE_SP);
                 } catch (Exception e3) {
-                    log.warn("[DATE PARSE] Falha ao converter data '{}'. Usando data/hora atual de SP.", dateStr);
-                    return ZonedDateTime.now(ZONE_SP);
+                    try {
+                        // 4. Fallback final: String ISO Local pura (ex: 2026-10-03T06:00:00)
+                        String normalized = dateStr.length() >= 19
+                                ? dateStr.substring(0, 19).replace(" ", "T")
+                                : dateStr;
+                        return java.time.LocalDateTime.parse(normalized).atZone(ZONE_SP);
+                    } catch (Exception e4) {
+                        log.warn("[INSIGHT-PARSER] Falha ao converter data '{}'. Usando fuso SP atual.", dateStr);
+                        return ZonedDateTime.now(ZONE_SP);
+                    }
                 }
             }
         }

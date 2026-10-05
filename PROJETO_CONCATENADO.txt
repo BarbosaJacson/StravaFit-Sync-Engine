@@ -1894,30 +1894,14 @@ import java.util.Optional;
 @Repository
 public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPrescriptionEntity, Long> {
 
-    /**
-     * Busca a prescriÃ§Ã£o exatamente agendada para a data informada (Prioridade 1 no InsightService).
-     */
     Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
 
-    /**
-     * Busca a prescriÃ§Ã£o mais recente agendada para uma data especÃ­fica, ordenando pela criaÃ§Ã£o.
-     */
     Optional<WorkoutPrescriptionEntity> findTopByScheduledDateOrderByCreatedAtDesc(LocalDate scheduledDate);
 
-    /**
-     * Fallback: Busca a prescriÃ§Ã£o mais recente agendada atÃ© a data informada (<= scheduledDate).
-     * Ordena primariamente pela data agendada decrescente e secundariamente pela data de criaÃ§Ã£o.
-     */
     Optional<WorkoutPrescriptionEntity> findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(LocalDate scheduledDate);
 
-    /**
-     * Busca a prescriÃ§Ã£o associada a uma atividade do Strava especÃ­fica (Upsert/Mapeamento).
-     */
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
 
-    /**
-     * Busca a prescriÃ§Ã£o mais recente de um cenÃ¡rio especÃ­fico (CenÃ¡rio 1 = Rodagem/Z2, CenÃ¡rio 2 = Tiros).
-     */
     Optional<WorkoutPrescriptionEntity> findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Integer targetScenario);
 }
 
@@ -2379,7 +2363,10 @@ public class InsightService {
 
         // Busca no MySQL a prescriÃ§Ã£o agendada para o prÃ³ximo treino (TerÃ§a, Quinta ou SÃ¡bado)
         LocalDate dataProximo = parseNextWorkoutDate(proximoTreinoData);
-        Optional<WorkoutPrescriptionEntity> proximaPrescricao = workoutPrescriptionRepository.findByScheduledDate(dataProximo);
+        // Garantir que o tipo retornado seja Optional
+        // Garanta que NÃƒO haja .orElse(null) no final desta linha:
+        Optional<WorkoutPrescriptionEntity> proximaPrescricao =
+                workoutPrescriptionRepository.findByScheduledDate(dataProximo);
 
         // Busca o Ãºltimo nÃ­vel gravado no MySQL pela WeeklyPlannerService para cada cenÃ¡rio
         int nivelAtualCenario1 = workoutPrescriptionRepository
@@ -2420,7 +2407,8 @@ public class InsightService {
         log.info("[INSIGHT] Data recebida: {} | Data normalizada SP: {} | LocalDate: {}",
                 dateStr, activityDate, dataTreinoHoje);
         Optional<WorkoutPrescriptionEntity> prescricaoHoje = workoutPrescriptionRepository
-                .findByScheduledDate(dataTreinoHoje).or(() -> workoutPrescriptionRepository
+                .findTopByScheduledDateOrderByCreatedAtDesc(dataTreinoHoje)
+                .or(() -> workoutPrescriptionRepository
                         .findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(dataTreinoHoje));
 
         // 9. Mapeia o cenÃ¡rio e o nÃ­vel salvando o histÃ³rico real
@@ -2457,11 +2445,24 @@ public class InsightService {
         String historicoPerformanceGlobal = sbHistoricoGlobal.toString();
 
         // 11. Passamos o prompt estruturado com todas as variÃ¡veis instanciadas e o 'user'
-        String prompt = buildProfessionalPrompt(user, name, metrics, activityDate, proximoTreinoData,
-                prescricaoAnterior.orElse(null), proximaPrescricao.orElse(null),
-                nivelAtualCenario1, nivelAtualCenario2, tipoEstimuloReal, janelasInstaveis,
-                mediaEficienciaTiros, mediaEficienciaZ2Curto, mediaEficienciaZ2Longo,
-                historicoPerformanceGlobal, climaHeader);
+        String prompt = buildProfessionalPrompt(
+                user,
+                name,
+                metrics,
+                activityDate,
+                proximoTreinoData,
+                prescricaoAnterior.orElse(null),
+                proximaPrescricao.orElse(null), // ðŸ‘ˆ Mantenha apenas UMA chamada de .orElse(null)
+                nivelAtualCenario1,
+                nivelAtualCenario2,
+                tipoEstimuloReal,
+                janelasInstaveis,
+                mediaEficienciaTiros,
+                mediaEficienciaZ2Curto,
+                mediaEficienciaZ2Longo,
+                historicoPerformanceGlobal,
+                climaHeader
+        );
 
         String rawAiResponse = geminiClient.getInsight(prompt);
         String cleanResult = removeXmlBlock(rawAiResponse);
@@ -2470,6 +2471,7 @@ public class InsightService {
         // 12. Persiste os dados tÃ©cnicos calculados oficialmente no MySQL
         self.persistirDadosTecnicos(activityId, user.getId(), activityDate, metrics, cleanResult, rawAiResponse, tipoEstimuloReal, cenarioDetectado, nivelDetectado);
         return sanitizeOutput(cleanResult);
+
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -2577,6 +2579,15 @@ public class InsightService {
         double histEfficiencyIndex = historico.stream().filter(a -> a.getDistanceKm() != null && a.getDistanceKm() > 0 && a.getAverageHeartRate() != null && a.getAverageHeartRate() > 0 && a.getTotalTimeMinutes() != null && a.getTotalTimeMinutes() > 0).mapToDouble(a -> (a.getDistanceKm() * 1000) / (a.getAverageHeartRate() * a.getTotalTimeMinutes())).average().orElse(0.0);
 
         StringBuilder sb = new StringBuilder();
+
+        // Data Fixa da Prova Alvo (Meia Maratona 2026)
+        LocalDate dataProvaAlvo = LocalDate.of(2026, 10, 31);
+        LocalDate dataTreinoAtual = date.toLocalDate();
+
+        // CÃ¡lculo de dias e semanas restantes
+        long diasRestantes = java.time.temporal.ChronoUnit.DAYS.between(dataTreinoAtual, dataProvaAlvo);
+        long semanasRestantes = (diasRestantes > 0) ? (diasRestantes / 7) + 1 : 0;
+
 
         sb.append("VOCÃŠ Ã‰ O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
         sb.append("SUA MISSÃƒO Ã‰ ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÃ“STICO FISIOLÃ“GICO, PRESCREVER A RECUPERAÃ‡ÃƒO E GERAR O PRÃ“XIMO TREINO.\n\n");
@@ -2707,11 +2718,27 @@ public class InsightService {
         sb.append("â€¢ Cite formalmente os autores do MongoDB (Casanova et al., San-MillÃ¡n & Brooks, Seiler).\n");
         sb.append("â€¢ Ã‰ ESTRITAMENTE PROIBIDO citar desvio padrÃ£o em bpm, picos intervalados ou oscilaÃ§Ã£o de ritmo nesta seÃ§Ã£o.\n\n");
 
-        sb.append("3.0 - ðŸ«€ ANÃLISE DE RITMO E COMPORTAMENTO CARDÃACO (");
+        sb.append("3.0 - ðŸ«€ ANÃLISE DE RITMO E COMPORTAMENTO CARDÃACO:\n");
         sb.append("[FOCO EXCLUSIVO: DINÃ‚MICA TEMPORAL, CARDÃACA, PACE DRIFT E EFICIÃŠNCIA]\n");
-        sb.append("â€¢ Use o nome do atleta e desenvolva a anÃ¡lise focando na estabilidade do ritmo e na curva da FrequÃªncia CardÃ­aca ao longo do tempo.\n");
+        sb.append("â€¢ Use o nome do atleta (").append(nomeAtletaReal).append(") e desenvolva a anÃ¡lise focando na estabilidade do ritmo e na curva da FrequÃªncia CardÃ­aca ao longo do tempo.\n");
         sb.append("â€¢ ANÃLISE MULTIFATORIAL DE IMPACTO AMBIENTAL (CLIMA E ALTIMETRIA):\n");
-        sb.append("â€¢ ANÃLISE MULTIFATORIAL DE IMPACTO (CLIMA E ALTIMETRIA):\n");
+        sb.append("  - CondiÃ§Ãµes ClimÃ¡ticas: ").append(climaHeader).append("\n");
+        sb.append("  - Altimetria Acumulada: +").append(String.format("%.0f", metrics.ganhoAlt())).append("m / -").append(String.format("%.0f", Math.abs(metrics.perdaAlt()))).append("m\n");
+        sb.append("  - VariaÃ§Ã£o em Circuito: ").append(String.format("%.0f", metrics.ganhoAlt() + Math.abs(metrics.perdaAlt()))).append("m\n");
+        sb.append("â€¢ Justifique a estabilidade utilizando o Desvio PadrÃ£o de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" janelas instÃ¡veis identificadas pelo sistema.\n");
+        sb.append("â€¢ Avalie a presenÃ§a ou ausÃªncia de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n\n");
+
+        sb.append("3.5 - ðŸŽ¯ AVALIAÃ‡ÃƒO DE PRONTIDÃƒO E PREPARO PARA A MEIA MARATONA (31/10/2026):\n");
+        sb.append("[FOCO EXCLUSIVO: ANÃLISE DE PRONTIDÃƒO, PREVENÃ‡ÃƒO DE LESÃ•ES E ESTRATÃ‰GIA DE PROVA]\n");
+        sb.append("â€¢ CONTAGEM REGRESSIVA OFICIAL: Faltam exatamente ").append(diasRestantes).append(" dias (aprox. ")
+                .append(semanasRestantes).append(" semanas) para a Meia Maratona de 31/10/2026.\n");
+        sb.append("â€¢ Consulte no contexto do MongoDB o documento 'macro_ciclo_meia_maratona_2026' ou 'DIRETRIZ_PROVA_ALVO' correspondente Ã  fase atual (Faltam ").append(diasRestantes).append(" dias).\n");
+        sb.append("â€¢ Com base no treino executado HOJE por ").append(nomeAtletaReal).append(" (Pace: ").append(metrics.paceFormatted())
+                .append(", FC MÃ©dia: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm, Efficiency Index: ")
+                .append(String.format("%.3f", metrics.efficiencyIndex())).append("), desenvolva uma anÃ¡lise cobrindo obrigatoriamente:\n");
+        sb.append("  1. PRONTIDÃƒO E PACE DE PROVA: AvaliaÃ§Ã£o da capacidade de sustentar os 21.1 km com a economia de corrida demonstrada hoje.\n");
+        sb.append("  2. PRESERVAÃ‡ÃƒO MUSCULAR E PREVENÃ‡ÃƒO DE LESÃ•ES: OrientaÃ§Ãµes prÃ¡ticas de fortalecimento (foco em sÃ³leo, quadrÃ­ceps e visualizaÃ§Ã£o de estabilizaÃ§Ã£o) e alongamentos pÃ³s-treino.\n");
+        sb.append("  3. FOCO MENTAL E DETERMINAÃ‡ÃƒO: InstruÃ§Ã£o tÃ¡tica para controle de ansiedade, gestÃ£o de ritmo e disciplina de pace em Z2.\n\n");
 
        sb.append("  - DIRETRIZ DE IMPACTO AMBIENTAL: Em casos de STATUS [CUMPRIDO PARCIALMENTE | NÃƒO CUMPRIDO] ou desempenho excepcional/abaixo do esperado, analise OBRIGATORIAMENTE o impacto direto do ganho/perda de elevaÃ§Ã£o e das condiÃ§Ãµes climÃ¡ticas sobre o ritmo, fadiga e frequÃªncia cardÃ­aca do atleta, utilizando os dados abaixo:\n")
                 .append("     CondiÃ§Ãµes ClimÃ¡ticas: ").append(climaHeader).append("\n")
@@ -2747,6 +2774,7 @@ public class InsightService {
         sb.append("5.0 - ðŸ½ï¸ NUTRIÃ‡ÃƒO / DESCANSO ðŸ’¤\n");
         sb.append("[Prescreva a estratÃ©gia detalhada de alimentaÃ§Ã£o prÃ©/pÃ³s treino e janelas de repouso conforme as diretrizes do MongoDB para o tipo de treino realizado HOJE. Se foi Z2 use 'light_moderated_days', se foi Tiros use 'high_intensity_days']\n\n");
 
+        // Em InsightService.java (no mÃ©todo buildProfessionalPrompt):
         sb.append("6.0 - ðŸ“… PRESCRIÃ‡ÃƒO STRAFIT PREDICT:\n\n");
         sb.append("PRÃ“XIMO TREINO: ").append(proximoTreinoData.toUpperCase()).append("\n\n");
 
@@ -2759,9 +2787,9 @@ public class InsightService {
             sb.append("INTENSIDADE: ").append(proximaPrescricao.getIntensity()).append("\n");
             sb.append("MÃ‰TODO: ").append(proximaPrescricao.getMethod()).append("\n\n");
         } else {
+            // Fallback: orienta a IA caso nÃ£o haja prescriÃ§Ã£o agendada no MySQL
             sb.append("A prescriÃ§Ã£o para o prÃ³ximo treino serÃ¡ atualizada pelo planejamento semanal na prÃ³xima segunda-feira.\n\n");
         }
-
         sb.append("--- INSTRUÃ‡ÃƒO TÃ‰CNICA DO SISTEMA ---\n");
         sb.append("Ao final do relatÃ³rio, adicione OBRIGATORIAMENTE o bloco XML abaixo UMA ÃšNICA VEZ:\n");
         sb.append("<prescription_data>\n");
@@ -2942,23 +2970,28 @@ public class InsightService {
         }
 
         try {
-            // 1. Tenta fazer o parse de strings que contÃªm offset ou indicador UTC 'Z' (ex: 2026-09-26T06:30:00Z)
-            return ZonedDateTime.parse(dateStr)
-                    .withZoneSameInstant(ZONE_SP); // Converte mantendo o instante real no tempo
+            // 1. Tenta ISO ZonedDateTime pleno (ex: 2026-10-03T06:00:00Z ou com offset)
+            return ZonedDateTime.parse(dateStr).withZoneSameInstant(ZONE_SP);
         } catch (Exception e1) {
             try {
-                // 2. Fallback para OffsetDateTime (ex: 2026-09-26T06:30:00-03:00)
-                return java.time.OffsetDateTime.parse(dateStr)
-                        .atZoneSameInstant(ZONE_SP);
+                // 2. Tenta OffsetDateTime
+                return java.time.OffsetDateTime.parse(dateStr).atZoneSameInstant(ZONE_SP);
             } catch (Exception e2) {
                 try {
-                    // 3. Fallback para LocalDateTime sem fuso (ex: 2026-09-26T06:30:00 ou com espaÃ§o)
-                    String normalizedDate = dateStr.length() >= 19 ? dateStr.substring(0, 19).replace(" ", "T") : dateStr;
-                    return LocalDateTime.parse(normalizedDate)
-                            .atZone(ZONE_SP); // Assume que a hora declarada jÃ¡ Ã© o horÃ¡rio de SP
+                    // 3. Tenta Instant forÃ§ando o indicador 'Z' se omitido
+                    String utcStr = dateStr.endsWith("Z") ? dateStr : dateStr + "Z";
+                    return java.time.Instant.parse(utcStr).atZone(ZONE_SP);
                 } catch (Exception e3) {
-                    log.warn("[DATE PARSE] Falha ao converter data '{}'. Usando data/hora atual de SP.", dateStr);
-                    return ZonedDateTime.now(ZONE_SP);
+                    try {
+                        // 4. Fallback final: String ISO Local pura (ex: 2026-10-03T06:00:00)
+                        String normalized = dateStr.length() >= 19
+                                ? dateStr.substring(0, 19).replace(" ", "T")
+                                : dateStr;
+                        return java.time.LocalDateTime.parse(normalized).atZone(ZONE_SP);
+                    } catch (Exception e4) {
+                        log.warn("[INSIGHT-PARSER] Falha ao converter data '{}'. Usando fuso SP atual.", dateStr);
+                        return ZonedDateTime.now(ZONE_SP);
+                    }
                 }
             }
         }
@@ -3278,6 +3311,10 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -3294,7 +3331,7 @@ public class SyncScheduler {
     private final ActivityRepository activityRepository;
     private final UserRepository userRepository;
     private final WeeklyPlannerService weeklyPlannerService;
-
+    private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     @Value("${strava.auto-start:false}")
     private boolean autoStart;
 
@@ -3325,7 +3362,7 @@ public class SyncScheduler {
                 return;
             }
 
-            // 1. Ordena todas as atividades da API do Strava da mais recente para a mais antiga
+            // 1. Garante ordenaÃ§Ã£o decrescente rigorosa por data antes de qualquer filtro
             List<StravaActivity> atividadesOrdenadas = response.activities().stream()
                     .sorted(Comparator.comparing(
                             act -> parseDate(act.getStartDateLocal()),
@@ -3333,17 +3370,17 @@ public class SyncScheduler {
                     ))
                     .toList();
 
-            // 2. Seleciona a primeira atividade mais recente que seja elegÃ­vel (nova ou recente sem insight)
+// 2. Busca a PRIMEIRA (mais recente) atividade elegÃ­vel
             Optional<StravaActivity> treinoPendente = atividadesOrdenadas.stream()
                     .filter(activity -> {
                         Optional<ActivityEntity> entityOpt = activityRepository.findById(activity.getId());
 
-                        // Se for uma atividade nova que ainda nÃ£o foi salva no banco -> Processa!
+                        // Se nÃ£o existe no banco MySQL -> Ã‰ um treino novo!
                         if (entityOpt.isEmpty()) {
                             return true;
                         }
 
-                        // Se jÃ¡ existe, reprocessa apenas se for dos Ãºltimos 7 dias e estiver sem insight vÃ¡lido
+                        // Se existe no banco, reprocessa APENAS se for recente (Ãºltimos 7 dias) e estiver SEM insight vÃ¡lido
                         ActivityEntity entity = entityOpt.get();
                         boolean recente = isActivityRecent(activity.getStartDateLocal(), 7);
                         return recente && !isValidInsight(entity.getGeminiInsight());
@@ -3434,16 +3471,26 @@ public class SyncScheduler {
         return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
     }
 
-    private java.time.LocalDateTime parseDate(String dateStr) {
+    private LocalDateTime parseDate(String dateStr) {
         if (dateStr == null || dateStr.isBlank()) {
-            return java.time.LocalDateTime.MIN;
+            return LocalDateTime.MIN;
         }
         try {
-            String cleanDate = dateStr.replace("Z", "");
-            return java.time.LocalDateTime.parse(cleanDate, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            String normalized = dateStr.replace("Z", "");
+
+            // CORREÃ‡ÃƒO AQUI: Verifica se hÃ¡ fuso horÃ¡rio (-03:00) procurando o hÃ­fen apÃ³s a data (posiÃ§Ã£o > 10)
+            boolean hasOffset = normalized.contains("+") ||
+                    (normalized.lastIndexOf("-") > 10);
+
+            if (hasOffset) {
+                return java.time.OffsetDateTime.parse(dateStr)
+                        .atZoneSameInstant(ZONE_SP)
+                        .toLocalDateTime();
+            }
+            return LocalDateTime.parse(normalized, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         } catch (Exception e) {
-            log.warn("[SYNC] Falha ao fazer parse da data da atividade: {}", dateStr);
-            return java.time.LocalDateTime.MIN;
+            log.warn("[SYNC-PARSER] Falha ao converter data '{}': {}", dateStr, e.getMessage());
+            return LocalDateTime.MIN;
         }
     }
 
@@ -3479,8 +3526,10 @@ import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.client.TelegramClient;
 import jackson.stravafit.model.ActivitySummaryEntity;
 import jackson.stravafit.model.UserEntity;
+import jackson.stravafit.model.UserEventEntity;
 import jackson.stravafit.model.WorkoutPrescriptionEntity;
 import jackson.stravafit.repository.ActivitySummaryRepository;
+import jackson.stravafit.repository.UserEventRepository;
 import jackson.stravafit.repository.UserRepository;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
 import lombok.RequiredArgsConstructor;
@@ -3493,6 +3542,8 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -3508,6 +3559,7 @@ public class WeeklyPlannerService {
     private final UserRepository userRepository;
     private final KnowledgeService knowledgeService;
     private final TelegramClient telegramClient;
+    private final UserEventRepository userEventRepository;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
 
@@ -3533,32 +3585,51 @@ public class WeeklyPlannerService {
     public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior() {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
-        // Pega de Segunda-Feira da semana corrente atÃ© o final do dia de hoje (SÃ¡bado)
-        LocalDateTime inicioSemana = hoje.with(DayOfWeek.MONDAY).atStartOfDay();
+        LocalDate inicio;
+        if (hoje.getDayOfWeek() == DayOfWeek.SATURDAY || hoje.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            inicio = hoje.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        } else {
+            inicio = hoje.minusWeeks(1).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        }
+
+        LocalDateTime inicioSemana = inicio.atStartOfDay();
         LocalDateTime fimSemana = hoje.atTime(23, 59, 59);
 
-        log.info("[WEEKLY PLANNER] Buscando treinos da semana entre {} e {}", inicioSemana, fimSemana);
+        log.info("[WEEKLY PLANNER] Buscando treinos da semana para o resumo entre {} e {}", inicioSemana, fimSemana);
 
-        return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
-    }
+        List<ActivitySummaryEntity> treinos = activitySummaryRepository
+                .findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
 
-    /**
-     * Mapeia a mÃ©dia do Efficiency Index (Ãºltimas 5 sessÃµes) para o NÃ­vel correspondente.
-     */
-    private int determinarNivelPorEI(double mediaEI) {
-        if (mediaEI >= 1.15) return 5;
-        if (mediaEI >= 1.10) return 4;
-        if (mediaEI >= 1.05) return 3;
-        if (mediaEI >= 1.00) return 2;
-        return 1;
+        if (treinos.isEmpty()) {
+            log.warn("[WEEKLY PLANNER] Nenhum treino no intervalo {}-{}. Usando fallback das Ãºltimas 3 sessÃµes do MySQL.", inicioSemana, fimSemana);
+            treinos = activitySummaryRepository.findTop10ByDetectedScenarioOrderByStartDateDesc(1).stream().limit(3).toList();
+        }
+
+        return treinos;
     }
 
     public String gerarPrescricaoSemanalIA(UserEntity user, List<ActivitySummaryEntity> treinosAnteriores) {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
-        LocalDate terca = hoje.with(DayOfWeek.TUESDAY);
-        LocalDate quinta = hoje.with(DayOfWeek.THURSDAY);
-        LocalDate sabado = hoje.with(DayOfWeek.SATURDAY);
+        LocalDate proximaSegunda;
+        if (hoje.getDayOfWeek() == DayOfWeek.SATURDAY || hoje.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            proximaSegunda = hoje.with(TemporalAdjusters.next(DayOfWeek.MONDAY));
+        } else {
+            proximaSegunda = hoje.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        }
+
+// Para garantir que a projeÃ§Ã£o da semana comece sempre a partir do dia seguinte ao sÃ¡bado:
+        LocalDate terca  = proximaSegunda.with(DayOfWeek.TUESDAY);
+        LocalDate quinta = proximaSegunda.with(DayOfWeek.THURSDAY);
+        LocalDate sabado = proximaSegunda.with(DayOfWeek.SATURDAY);
+
+        // CÃLCULO DAS SEMANAS RESTANTES PARA O EVENTO PRINCIPAL
+        LocalDate dataProvaAlvo = userEventRepository.findByUserIdAndIsMainEventTrue(user.getId())
+                .map(UserEventEntity::getEventDate)
+                .orElse(LocalDate.of(2026, 10, 31));
+
+        long diasParaProva = ChronoUnit.DAYS.between(hoje, dataProvaAlvo);
+        long semanasParaProva = Math.max(1, (diasParaProva / 7) + 1);
 
         // 1. HistÃ³rico recente de cada cenÃ¡rio no MySQL
         List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
@@ -3578,16 +3649,21 @@ public class WeeklyPlannerService {
         List<ActivitySummaryEntity> ultimosSabados = listaCenario1.stream()
                 .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
                 .limit(5).toList();
+        int nivelVigenteCenario1 = workoutPrescriptionRepository
+                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(1)
+                .map(WorkoutPrescriptionEntity::getTargetLevel)
+                .orElse(1);
+
+        int nivelVigenteCenario2 = workoutPrescriptionRepository
+                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(2)
+                .map(WorkoutPrescriptionEntity::getTargetLevel)
+                .orElse(1);
 
         // 3. MÃ©dia de Efficiency Index das 5 sessÃµes de cada dia
         double mediaEI_Terca = ultimasTercas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
         double mediaEI_Quinta = ultimasQuintas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
         double mediaEI_Sabado = ultimosSabados.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
 
-        // 4. Determina o nÃ­vel com base puramente na mÃ©dia de cada dia
-        int nivelTerca  = determinarNivelPorEI(mediaEI_Terca);
-        int nivelQuinta = determinarNivelPorEI(mediaEI_Quinta);
-        int nivelSabado = determinarNivelPorEI(mediaEI_Sabado);
 
         // ðŸŽ¯ BASE CIENTÃFICA NO MONGODB PASSANDO O ENUM GENDER
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
@@ -3604,6 +3680,7 @@ public class WeeklyPlannerService {
             sb.append("INSTRUÃ‡ÃƒO DE CONSULTA: Consulte os documentos JSON abaixo e localize os parÃ¢metros do CenÃ¡rio e NÃ­vel de cada dia. Extraia exatamente o tipo de treino, a duraÃ§Ã£o, a distÃ¢ncia estimada, as faixas de FC/bpm, o foco tÃ©cnico e o mÃ©todo detalhado.\n");
             sb.append(scientificContext).append("\n\n");
         }
+
 
         if (treinosAnteriores.isEmpty()) {
             sb.append("Nenhum treino registrado no MySQL na semana passada. Aplique os parÃ¢metros padrÃ£o do MongoDB para retorno gradual.\n\n");
@@ -3634,11 +3711,92 @@ public class WeeklyPlannerService {
             }
             sb.append("\n");
         }
+        sb.append("--- DIRETRIZES DE AVALIAÃ‡ÃƒO DE NÃVEL E PRESCRIÃ‡ÃƒO (SISTEMA DE DECISÃƒO IA) ---\n");
+        sb.append("1. CONSULTA MANDATÃ“RIA AO MONGODB:\n");
+        sb.append("   - Para cada dia prescrito, vocÃª DEVE consultar os documentos JSON 'cenario_1_aerobico' e 'cenario_2_anaerobico_tiros' fornecidos acima.\n");
+        sb.append("   - Localize o NÃ­vel ativo indicado para o dia, varra a lista 'variacoes_estimulo' e selecione a variaÃ§Ã£o EXATA cujo parÃ¢metro 'criterio_ia' contemple a mÃ©dia de Efficiency Index (EI) calculada pelo sistema.\n");
+        sb.append("   - Extraia rigorosamente do JSON selecionado: 'type', 'distance_km', 'duration', 'intensity', 'focus' e 'method' (detalhando tiros/pausas se for CenÃ¡rio 2).\n\n");
 
-        sb.append("--- DIRETRIZES DE CENÃRIO E NÃVEIS OBRIGATÃ“RIOS DO SISTEMA ---\n");
-        sb.append("1. TERÃ‡A-FEIRA (").append(terca).append("): Prescrever CENÃRIO 1 no NÃVEL ").append(nivelTerca).append(" (Rodagem Leve / Z2 - FATMAX).\n");
-        sb.append("2. QUINTA-FEIRA (").append(quinta).append("): Prescrever CENÃRIO 2 no NÃVEL ").append(nivelQuinta).append(" (IntensificaÃ§Ã£o / Tiros / VO2mÃ¡x).\n");
-        sb.append("3. SÃBADO (").append(sabado).append("): Prescrever CENÃRIO 1 no NÃVEL ").append(nivelSabado).append(" (LongÃ£o / Rodagem de Base - Zona 2).\n\n");
+        sb.append("--- DIRETRIZES DE AVALIAÃ‡ÃƒO DE NÃVEL E PRESCRIÃ‡ÃƒO (SISTEMA DE DECISÃƒO IA) ---\n");
+        sb.append("1. CONSULTA MANDATÃ“RIA AO MONGODB:\n");
+        sb.append("   - Para cada dia prescrito, vocÃª DEVE consultar os documentos JSON 'cenario_1_aerobico' e 'cenario_2_anaerobico_tiros' fornecidos acima.\n");
+        sb.append("   - Localize o NÃ­vel ativo indicado para o dia, varra a lista 'variacoes_estimulo' e selecione a variaÃ§Ã£o EXATA cujo parÃ¢metro 'criterio_ia' contemple a mÃ©dia de Efficiency Index (EI) calculada pelo sistema.\n");
+        sb.append("   - Extraia rigorosamente do JSON selecionado: 'type', 'distance_km', 'duration', 'intensity', 'focus' e 'method' (detalhando tiros/pausas se for CenÃ¡rio 2).\n\n");
+
+        sb.append("--- DIRETRIZES DE DECISÃƒO E SELEÃ‡ÃƒO DE NÃVEL (CONSULTA DINÃ‚MICA AO JSON) ---\n");
+        sb.append("Para cada dia prescrito, vocÃª deve consultar os documentos JSON 'cenario_1_aerobico' e 'cenario_2_anaerobico_tiros' e selecionar o NÃVEL e VARIAÃ‡ÃƒO correspondentes avaliando as regras de 'criterio_ia' e 'gatilho_promocao' com base no Efficiency Index mÃ©dio calculado pelo sistema:\n\n");
+
+        sb.append("--- ESTADO DE PROGRESSÃƒO E NÃVEIS ATUAIS (MYSQL -> MONGODB) ---\n");
+        sb.append("O atleta encontra-se atualmente no MySQL com os seguintes nÃ­veis ativos:\n");
+        sb.append("- CenÃ¡rio 1 (Rodagens/LongÃ£o Z2): NÃVEL ").append(nivelVigenteCenario1).append("\n");
+        sb.append("- CenÃ¡rio 2 (Tiros VO2mÃ¡x): NÃVEL ").append(nivelVigenteCenario2).append("\n\n");
+
+        sb.append("--- ESTADO DE PROGRESSÃƒO E NÃVEIS ATUAIS (MYSQL -> MONGODB) ---\n");
+        sb.append("O atleta possui o seguinte histÃ³rico de nÃ­veis ativos gravados no MySQL:\n");
+        sb.append("- CenÃ¡rio 1 (Rodagens/LongÃ£o Z2): NÃVEL ").append(nivelVigenteCenario1).append("\n");
+        sb.append("- CenÃ¡rio 2 (Tiros VO2mÃ¡x): NÃVEL ").append(nivelVigenteCenario2).append("\n\n");
+
+        sb.append("--- MÃ‰DIAS DE EFFICIENCY INDEX (ÃšLTIMAS 5 SESSÃ•ES) ---\n");
+        sb.append("- TerÃ§a-feira (CenÃ¡rio 1 - Rodagem Leve): ").append(String.format("%.3f", mediaEI_Terca)).append("\n");
+        sb.append("- Quinta-feira (CenÃ¡rio 2 - Tiros Z3/Z4): ").append(String.format("%.3f", mediaEI_Quinta)).append("\n");
+        sb.append("- SÃ¡bado (CenÃ¡rio 1 - LongÃ£o Z2): ").append(String.format("%.3f", mediaEI_Sabado)).append("\n\n");
+
+        sb.append("--- DIRETRIZES EXCLUSIVAS DE PRESCRIÃ‡ÃƒO E REGRAS DE NÃVEL ---\n");
+        sb.append("1. TERÃ‡A-FEIRA (Rodagem Leve / FatMax):\n");
+        sb.append("   - Fisiologicamente TRAVADA no NÃVEL 1 do 'cenario_1_aerobico' (Teto mÃ¡ximo de 10.0 km para evitar sobrecarga no inÃ­cio da semana).\n");
+        sb.append("   - Avalie o EI mÃ©dio das TerÃ§as (").append(String.format("%.3f", mediaEI_Terca)).append(") dentro do NÃ­vel 1:\n");
+        sb.append("     * Se EI >= 1.050: Selecione OBRIGATORIAMENTE a variaÃ§Ã£o N1-V4 (ConsolidaÃ§Ã£o do Teto Base - 10.0 km).\n");
+        sb.append("   - Defina a tag <target_level>1</target_level>.\n\n");
+
+        sb.append("2. QUINTA-FEIRA (Tiros / VO2mÃ¡x):\n");
+        sb.append("   - Consulte o NÃ­vel Ativo do CenÃ¡rio 2 no MySQL (NÃ­vel ").append(nivelVigenteCenario2).append(") no 'cenario_2_anaerobico_tiros'.\n");
+        sb.append("   - Verifique na chave 'gatilho_promocao' se o EI mÃ©dio (").append(String.format("%.3f", mediaEI_Quinta)).append(") promove o atleta para o prÃ³ximo NÃ­vel.\n");
+        sb.append("   - Selecione a variaÃ§Ã£o exata em 'variacoes_estimulo' do nÃ­vel resultante conforme a regra 'criterio_ia'.\n");
+        sb.append("   - Defina a tag <target_level> com o nÃºmero do nÃ­vel selecionado (1 a 5).\n\n");
+
+        sb.append("3. SÃBADO (LongÃ£o de Base / Z2):\n");
+        sb.append("   - Consulte o NÃ­vel Ativo do CenÃ¡rio 1 no MySQL (NÃ­vel ").append(nivelVigenteCenario1).append(") no 'cenario_1_aerobico'.\n");
+        sb.append("   - Avalie se o EI mÃ©dio dos SÃ¡bados (").append(String.format("%.3f", mediaEI_Sabado)).append(") e o histÃ³rico de sessÃµes acionam o 'gatilho_promocao' para subir de nÃ­vel (ex: N1 -> N2 -> N3 -> N4 -> N5).\n");
+        sb.append("   - Mapeie a variaÃ§Ã£o exata em 'variacoes_estimulo' extraindo volume, tempo e foco tÃ©cnico do LongÃ£o.\n");
+        sb.append("   - Defina a tag <target_level> com o nÃºmero do nÃ­vel selecionado (1 a 5).\n\n");
+
+        sb.append("--- REGRA DE SELEÃ‡ÃƒO DE TREINO E PROMOÃ‡ÃƒO ---\n");
+        sb.append("1. Para cada dia, consulte o JSON correspondente no MongoDB para o NÃ­vel Ativo do cenÃ¡rio.\n");
+        sb.append("2. Verifique se o histÃ³rico do atleta atinge os critÃ©rios do 'gatilho_promocao' (ex: sessÃµes consecutivas acima do limite de EI) para promover ao NÃ­vel subsequente.\n");
+        sb.append("3. Dentro do NÃ­vel selecionado (atual ou promovido), busque em 'variacoes_estimulo' a variaÃ§Ã£o cuja regra 'criterio_ia' atenda o EI mÃ©dio fornecido.\n");
+        sb.append("4. Preencha a tag <target_level> com o nÃºmero exato do NÃ­vel (1 a 5) selecionado para gravaÃ§Ã£o no MySQL.\n\n");
+        sb.append("3. TRAVA DE INTEGRIDADE:\n");
+        sb.append("   - Ã‰ ESTRITAMENTE PROIBIDO inventar faixas de distÃ¢ncia, tempos de tiro ou repetiÃ§Ãµes que nÃ£o constem expressamente nas estruturas 'variacoes_estimulo' do MongoDB para o nÃ­vel selecionado.\n\n");
+
+        sb.append("1. CONSULTA AO MACROCICLO DA MEIA MARATONA ('macro_ciclo_meia_maratona_2026'):\n");
+        sb.append("   â€¢ Com base nas ").append(semanasParaProva).append(" semanas restantes para o evento de ").append(dataProvaAlvo).append(":\n");
+        sb.append("     - Identifique a chave de fase correspondente no JSON ('semanas_restantes_4_a_3' ou 'semanas_restantes_2_a_1').\n");
+        sb.append("     - Aplique obrigatoriamente as orientaÃ§Ãµes de 'foco_longao' / 'foco_volume', 'fortalecimento_e_prevencao' e 'cuidados_fisiologicos' da fase ativa no campo <focus> e <method> de cada prescriÃ§Ã£o.\n");
+        sb.append("     - Na tag <weekly_overview>, faÃ§a a sÃ­ntese do desempenho da semana anterior do MySQL correlacionando diretamente o estado do atleta com a fase do macrociclo descrita no documento.\n\n");
+
+        boolean ehSemanaDaProva = sabado.equals(dataProvaAlvo);
+
+        sb.append("--- REGRA ESPECIAL DE PROVA ALVO (MEIA MARATONA - 31/10/2026) ---\n");
+        if (ehSemanaDaProva) {
+            sb.append("ðŸš¨ ATENÃ‡ÃƒO IA - GATILHO DE PROVA ATIVADO PARA SÃBADO (31/10/2026):\n");
+            sb.append("1. O prÃ³ximo sÃ¡bado NÃƒO Ã© um treino comum. Ã‰ o dia da MEIA MARATONA OFICIAL (21.1 km) do atleta Jacson Barbosa.\n");
+            sb.append("2. SUBSTITUA o treino convencional do 'cenario_1_aerobico' pela prescriÃ§Ã£o tÃ¡tica da prova.\n");
+            sb.append("3. CONSULTA OBRIGATÃ“RIA AO MYSQL (activity_performance_summary):\n");
+            sb.append("   - Analise os treinos de LongÃ£o (SÃ¡bados) do MySQL e extraia a mÃ©dia do Efficiency Index (EI) e o Pace MÃ©dio das melhores sessÃµes em NÃ­vel 4 e 5.\n");
+            sb.append("   - Calcule o Pace Alvo de Prova recomendado (min/km) e o tempo total estimado de prova para cobrir os 21.097 km.\n");
+            sb.append("4. PREENCHIMENTO DA TAG <prescription> DO SÃBADO (31/10/2026):\n");
+            sb.append("   - <type>PROVA OFICIAL - MEIA MARATONA (21.1 KM)</type>\n");
+            sb.append("   - <distance_km>21.1</distance_km>\n");
+            sb.append("   - <duration>[Informe o tempo total estimado calculado ex: 130 a 135 minutos]</duration>\n");
+            sb.append("   - <intensity>GestÃ£o Z2 no inÃ­cio (125-139 bpm) progredindo para Z3/Z4 nos km finais</intensity>\n");
+            sb.append("   - <focus>ExecuÃ§Ã£o do plano de prova de 21.1 km. Controle rigoroso de pacing, hidrataÃ§Ã£o constante e reserva funcional para os km 15 a 21.</focus>\n");
+            sb.append("   - <method>Detalhar a estratÃ©gia em 3 blocos: Km 0-5 em Z2 pura; Km 5-15 em Z2/Z3 mantendo o Pace Alvo Calculado; Km 15-21 em Z3/Z4 aproveitando a supercompensaÃ§Ã£o do polimento.</method>\n");
+            sb.append("   - <justification>PrescriÃ§Ã£o oficial da prova alvo ajustada pela capacidade de endurance e pela mÃ©dia histÃ³rica de eficiÃªncia recuperada do MySQL.</justification>\n");
+            sb.append("   - <target_scenario>1</target_scenario>\n");
+            sb.append("   - <target_level>5</target_level>\n\n");
+        } else {
+            sb.append("SÃ¡bado normal de treino. Seguir as diretrizes padrÃ£o de progressÃ£o de NÃ­vel em 'cenario_1_aerobico'.\n\n");
+        }
 
         sb.append("FORMATO DE SAÃDA EXIGIDO:\n");
         sb.append("Monte o planejamento baseado estritamente nas anÃ¡lises da semana lidas do MySQL cruzadas com as diretrizes do MongoDB. Retorne OBRIGATORIAMENTE o bloco XML a seguir:\n\n");
@@ -3656,7 +3814,7 @@ public class WeeklyPlannerService {
         sb.append("    <method>[DescriÃ§Ã£o detalhada do mÃ©todo conforme MongoDB]</method>\n");
         sb.append("    <justification>[Justificativa fisiolÃ³gica da escolha]</justification>\n");
         sb.append("    <target_scenario>1</target_scenario>\n");
-        sb.append("    <target_level>").append(nivelTerca).append("</target_level>\n");
+        sb.append("    <target_level>[NÃºmero do NÃ­vel de 1 a 5 identificado dinamicamente no MongoDB para este EI]</target_level>\n");
         sb.append("  </prescription>\n");
 
         sb.append("  <prescription>\n");
@@ -3669,7 +3827,7 @@ public class WeeklyPlannerService {
         sb.append("    <method>[Detalhamento de SÃ©ries, Tiros, Pausas e Zonas conforme MongoDB]</method>\n");
         sb.append("    <justification>[Justificativa fisiolÃ³gica da escolha dos tiros]</justification>\n");
         sb.append("    <target_scenario>2</target_scenario>\n");
-        sb.append("    <target_level>").append(nivelQuinta).append("</target_level>\n");
+        sb.append("    <target_level>[NÃºmero do NÃ­vel de 1 a 5 identificado dinamicamente no MongoDB para este EI]</target_level>\n");
         sb.append("  </prescription>\n");
 
         sb.append("  <prescription>\n");
@@ -3682,7 +3840,7 @@ public class WeeklyPlannerService {
         sb.append("    <method>[DescriÃ§Ã£o detalhada do mÃ©todo do LongÃ£o conforme MongoDB]</method>\n");
         sb.append("    <justification>[Justificativa fisiolÃ³gica do volume]</justification>\n");
         sb.append("    <target_scenario>1</target_scenario>\n");
-        sb.append("    <target_level>").append(nivelSabado).append("</target_level>\n");
+        sb.append("    <target_level>[NÃºmero do NÃ­vel de 1 a 5 identificado dinamicamente no MongoDB para este EI]</target_level>\n");
         sb.append("  </prescription>\n");
 
         sb.append("</weekly_prescription>\n");

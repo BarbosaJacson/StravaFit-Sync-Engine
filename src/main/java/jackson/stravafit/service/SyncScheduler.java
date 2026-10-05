@@ -16,6 +16,10 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -32,7 +36,7 @@ public class SyncScheduler {
     private final ActivityRepository activityRepository;
     private final UserRepository userRepository;
     private final WeeklyPlannerService weeklyPlannerService;
-
+    private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     @Value("${strava.auto-start:false}")
     private boolean autoStart;
 
@@ -63,7 +67,7 @@ public class SyncScheduler {
                 return;
             }
 
-            // 1. Ordena todas as atividades da API do Strava da mais recente para a mais antiga
+            // 1. Garante ordenação decrescente rigorosa por data antes de qualquer filtro
             List<StravaActivity> atividadesOrdenadas = response.activities().stream()
                     .sorted(Comparator.comparing(
                             act -> parseDate(act.getStartDateLocal()),
@@ -71,17 +75,17 @@ public class SyncScheduler {
                     ))
                     .toList();
 
-            // 2. Seleciona a primeira atividade mais recente que seja elegível (nova ou recente sem insight)
+// 2. Busca a PRIMEIRA (mais recente) atividade elegível
             Optional<StravaActivity> treinoPendente = atividadesOrdenadas.stream()
                     .filter(activity -> {
                         Optional<ActivityEntity> entityOpt = activityRepository.findById(activity.getId());
 
-                        // Se for uma atividade nova que ainda não foi salva no banco -> Processa!
+                        // Se não existe no banco MySQL -> É um treino novo!
                         if (entityOpt.isEmpty()) {
                             return true;
                         }
 
-                        // Se já existe, reprocessa apenas se for dos últimos 7 dias e estiver sem insight válido
+                        // Se existe no banco, reprocessa APENAS se for recente (últimos 7 dias) e estiver SEM insight válido
                         ActivityEntity entity = entityOpt.get();
                         boolean recente = isActivityRecent(activity.getStartDateLocal(), 7);
                         return recente && !isValidInsight(entity.getGeminiInsight());
@@ -172,16 +176,26 @@ public class SyncScheduler {
         return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
     }
 
-    private java.time.LocalDateTime parseDate(String dateStr) {
+    private LocalDateTime parseDate(String dateStr) {
         if (dateStr == null || dateStr.isBlank()) {
-            return java.time.LocalDateTime.MIN;
+            return LocalDateTime.MIN;
         }
         try {
-            String cleanDate = dateStr.replace("Z", "");
-            return java.time.LocalDateTime.parse(cleanDate, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            String normalized = dateStr.replace("Z", "");
+
+            // CORREÇÃO AQUI: Verifica se há fuso horário (-03:00) procurando o hífen após a data (posição > 10)
+            boolean hasOffset = normalized.contains("+") ||
+                    (normalized.lastIndexOf("-") > 10);
+
+            if (hasOffset) {
+                return java.time.OffsetDateTime.parse(dateStr)
+                        .atZoneSameInstant(ZONE_SP)
+                        .toLocalDateTime();
+            }
+            return LocalDateTime.parse(normalized, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         } catch (Exception e) {
-            log.warn("[SYNC] Falha ao fazer parse da data da atividade: {}", dateStr);
-            return java.time.LocalDateTime.MIN;
+            log.warn("[SYNC-PARSER] Falha ao converter data '{}': {}", dateStr, e.getMessage());
+            return LocalDateTime.MIN;
         }
     }
 
