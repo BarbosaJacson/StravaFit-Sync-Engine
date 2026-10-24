@@ -387,6 +387,7 @@ public class InsightService {
         // Data Fixa da Prova Alvo (Meia Maratona 2026)
         LocalDate dataProvaAlvo = LocalDate.of(2026, 10, 31);
         LocalDate dataTreinoAtual = date.toLocalDate();
+        boolean ehDiaDaProvaAlvo = dataTreinoAtual.equals(dataProvaAlvo);
 
         // Cálculo de dias e semanas restantes
         long diasRestantes = java.time.temporal.ChronoUnit.DAYS.between(dataTreinoAtual, dataProvaAlvo);
@@ -411,6 +412,10 @@ public class InsightService {
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
         sb.append("--- CONDIÇÕES CLIMÁTICAS NO MOMENTO DO TREINO ---\n");
+
+        if (ehDiaDaProvaAlvo) {
+            sb.append("🚨 ATENÇÃO IA - DIRETRIZ ESPECIAL DE PROVA OFICIAL: HOJE É O DIA DA MEIA MARATONA OFICIAL (21.1 KM). Substitua obrigatoriamente todos os termos 'Treino' por 'Meia Maratona' ou 'Prova Oficial' no cabeçalho e ao longo de todo o relatório.\n\n");
+        }
 
         sb.append("INSTRUÇÃO FISIOLÓGICA: Considere o estresse térmico acima na análise. Se a umidade for alta (>80%) ou a temperatura for elevada (>25°C), mencione o impacto no aumento da Frequência Cardíaca (débito cardíaco) para termorregulação e dê recomendações de hidratação e recuperação.\n\n");
 
@@ -495,7 +500,7 @@ public class InsightService {
         sb.append("- Eficiência Média: ").append(String.format("%.3f", histEfficiencyIndex)).append(" (m/bpm*min)\n\n");
 
         if (prescricaoAnterior != null) {
-            sb.append("📋 PLANO DO TREINO:\n").append(prescricaoAnterior.getScheduledDate()).append("\n");
+            sb.append("📋 PLANO:\n").append(prescricaoAnterior.getScheduledDate()).append("\n");
             sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
             sb.append("- Duração/Volume: ").append(prescricaoAnterior.getDuration()).append("\n");
             sb.append("- Intensidade Alvo: ").append(prescricaoAnterior.getIntensity()).append("\n");

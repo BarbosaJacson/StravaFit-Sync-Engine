@@ -255,6 +255,7 @@ public class WeeklyPlannerService {
         boolean ehSemanaDaProva = sabado.equals(dataProvaAlvo);
 
         sb.append("--- REGRA ESPECIAL DE PROVA ALVO (MEIA MARATONA - 31/10/2026) ---\n");
+        sb.append("Consulte o documento chave 'evento_meia_maratona_2026' na base de conhecimento do MongoDB fornecida acima.\n\n");
         if (ehSemanaDaProva) {
             sb.append("🚨 ATENÇÃO IA - GATILHO DE PROVA ATIVADO PARA SÁBADO (31/10/2026):\n");
             sb.append("1. O próximo sábado NÃO é um treino comum. É o dia da MEIA MARATONA OFICIAL (21.1 km) do atleta Jacson Barbosa.\n");
@@ -267,11 +268,13 @@ public class WeeklyPlannerService {
             sb.append("   - <distance_km>21.1</distance_km>\n");
             sb.append("   - <duration>[Informe o tempo total estimado calculado ex: 130 a 135 minutos]</duration>\n");
             sb.append("   - <intensity>Gestão Z2 no início (125-139 bpm) progredindo para Z3/Z4 nos km finais</intensity>\n");
-            sb.append("   - <focus>Execução do plano de prova de 21.1 km. Controle rigoroso de pacing, hidratação constante e reserva funcional para os km 15 a 21.</focus>\n");
-            sb.append("   - <method>Detalhar a estratégia em 3 blocos: Km 0-5 em Z2 pura; Km 5-15 em Z2/Z3 mantendo o Pace Alvo Calculado; Km 15-21 em Z3/Z4 aproveitando a supercompensação do polimento.</method>\n");
-            sb.append("   - <justification>Prescrição oficial da prova alvo ajustada pela capacidade de endurance e pela média histórica de eficiência recuperada do MySQL.</justification>\n");
+            sb.append("   - <focus>Execução do plano de prova de 21.1 km. Controle rigoroso de pacing, hidratação constante, gestão de altimetria nas pontes/viadutos e reserva funcional para os km 15 a 21.</focus>\n");
+            sb.append("   - <method>Detalhar a estratégia fracionando a prova em trechos de 3 km, analisando a progressão do ritmo e FC a cada bloco e incorporando os acidentes altimétricos da rota: Km 0-3 em Z2 pura para aclimação; Km 3-6 em Z2 (atenção ao Km 5 na subida da Ponte Rio Poxim com +10m de elevação - gerenciar esforço por FC para evitar picos precoces); Km 6-9 em Z2 no plano mantendo o Pace Alvo; Km 9-12 em Z2/Z3 administrando as variações dos viadutos e pontes da Farolândia; Km 12-15 em Z3 no trecho plano do Parque da Sementeira/Riomar; Km 15-18 e 18-21 em Z3/Z4 sustentado aproveitando a supercompensação do polimento, com 100m finais livres para o pórtico de chegada.</method>\n");
+            sb.append("   - <nutrition_details>Estratégia de suplementação intra-prova (10g-20g CHO/h): Consumir o 1º Gel de Carboidrato no Km 6 (logo após a descida da Ponte Rio Poxim) e o 2º Gel no Km 13 (no plano do Parque da Sementeira). Obrigatoriamente ingerir ambos acompanhados de 150-200ml de água pura no posto de hidratação para garantir a taxa de esvaziamento gástrico e rápida absorção de glicose.</nutrition_details>\n");
+            sb.append("   - <justification>Prescrição oficial da prova alvo ajustada pela capacidade de endurance, perfil de altimetria e pela média histórica de eficiência recuperada do MySQL.</justification>\n");
+            sb.append("   - <conclusion_note>Com base na evolução do Efficiency Index (médias de 1.100+ em Z2/Z4), no acoplamento cardiovascular e na disciplina impecável do atleta Jacson Barbosa nos treinos, a preparação está consolidada — confiança total para fazer uma grande prova!</conclusion_note>\n");
             sb.append("   - <target_scenario>1</target_scenario>\n");
-            sb.append("   - <target_level>5</target_level>\n\n");
+                        sb.append("   - <target_level>5</target_level>\n\n");
         } else {
             sb.append("Sábado normal de treino. Seguir as diretrizes padrão de progressão de Nível em 'cenario_1_aerobico'.\n\n");
         }
