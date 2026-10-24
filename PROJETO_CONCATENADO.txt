@@ -2583,6 +2583,7 @@ public class InsightService {
         // Data Fixa da Prova Alvo (Meia Maratona 2026)
         LocalDate dataProvaAlvo = LocalDate.of(2026, 10, 31);
         LocalDate dataTreinoAtual = date.toLocalDate();
+        boolean ehDiaDaProvaAlvo = dataTreinoAtual.equals(dataProvaAlvo);
 
         // CÃ¡lculo de dias e semanas restantes
         long diasRestantes = java.time.temporal.ChronoUnit.DAYS.between(dataTreinoAtual, dataProvaAlvo);
@@ -2607,6 +2608,10 @@ public class InsightService {
 
         sb.append("REGRA DE FORMATAÃ‡ÃƒO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÃTULOS EM MAIÃšSCULAS E QUEBRAS DE LINHA. Ã‰ ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
         sb.append("--- CONDIÃ‡Ã•ES CLIMÃTICAS NO MOMENTO DO TREINO ---\n");
+
+        if (ehDiaDaProvaAlvo) {
+            sb.append("ðŸš¨ ATENÃ‡ÃƒO IA - DIRETRIZ ESPECIAL DE PROVA OFICIAL: HOJE Ã‰ O DIA DA MEIA MARATONA OFICIAL (21.1 KM). Substitua obrigatoriamente todos os termos 'Treino' por 'Meia Maratona' ou 'Prova Oficial' no cabeÃ§alho e ao longo de todo o relatÃ³rio.\n\n");
+        }
 
         sb.append("INSTRUÃ‡ÃƒO FISIOLÃ“GICA: Considere o estresse tÃ©rmico acima na anÃ¡lise. Se a umidade for alta (>80%) ou a temperatura for elevada (>25Â°C), mencione o impacto no aumento da FrequÃªncia CardÃ­aca (dÃ©bito cardÃ­aco) para termorregulaÃ§Ã£o e dÃª recomendaÃ§Ãµes de hidrataÃ§Ã£o e recuperaÃ§Ã£o.\n\n");
 
@@ -2691,7 +2696,7 @@ public class InsightService {
         sb.append("- EficiÃªncia MÃ©dia: ").append(String.format("%.3f", histEfficiencyIndex)).append(" (m/bpm*min)\n\n");
 
         if (prescricaoAnterior != null) {
-            sb.append("ðŸ“‹ PLANO DO TREINO:\n").append(prescricaoAnterior.getScheduledDate()).append("\n");
+            sb.append("ðŸ“‹ PLANO:\n").append(prescricaoAnterior.getScheduledDate()).append("\n");
             sb.append("- Tipo Planejado: ").append(prescricaoAnterior.getType()).append("\n");
             sb.append("- DuraÃ§Ã£o/Volume: ").append(prescricaoAnterior.getDuration()).append("\n");
             sb.append("- Intensidade Alvo: ").append(prescricaoAnterior.getIntensity()).append("\n");
@@ -3777,6 +3782,7 @@ public class WeeklyPlannerService {
         boolean ehSemanaDaProva = sabado.equals(dataProvaAlvo);
 
         sb.append("--- REGRA ESPECIAL DE PROVA ALVO (MEIA MARATONA - 31/10/2026) ---\n");
+        sb.append("Consulte o documento chave 'evento_meia_maratona_2026' na base de conhecimento do MongoDB fornecida acima.\n\n");
         if (ehSemanaDaProva) {
             sb.append("ðŸš¨ ATENÃ‡ÃƒO IA - GATILHO DE PROVA ATIVADO PARA SÃBADO (31/10/2026):\n");
             sb.append("1. O prÃ³ximo sÃ¡bado NÃƒO Ã© um treino comum. Ã‰ o dia da MEIA MARATONA OFICIAL (21.1 km) do atleta Jacson Barbosa.\n");
@@ -3789,11 +3795,13 @@ public class WeeklyPlannerService {
             sb.append("   - <distance_km>21.1</distance_km>\n");
             sb.append("   - <duration>[Informe o tempo total estimado calculado ex: 130 a 135 minutos]</duration>\n");
             sb.append("   - <intensity>GestÃ£o Z2 no inÃ­cio (125-139 bpm) progredindo para Z3/Z4 nos km finais</intensity>\n");
-            sb.append("   - <focus>ExecuÃ§Ã£o do plano de prova de 21.1 km. Controle rigoroso de pacing, hidrataÃ§Ã£o constante e reserva funcional para os km 15 a 21.</focus>\n");
-            sb.append("   - <method>Detalhar a estratÃ©gia em 3 blocos: Km 0-5 em Z2 pura; Km 5-15 em Z2/Z3 mantendo o Pace Alvo Calculado; Km 15-21 em Z3/Z4 aproveitando a supercompensaÃ§Ã£o do polimento.</method>\n");
-            sb.append("   - <justification>PrescriÃ§Ã£o oficial da prova alvo ajustada pela capacidade de endurance e pela mÃ©dia histÃ³rica de eficiÃªncia recuperada do MySQL.</justification>\n");
+            sb.append("   - <focus>ExecuÃ§Ã£o do plano de prova de 21.1 km. Controle rigoroso de pacing, hidrataÃ§Ã£o constante, gestÃ£o de altimetria nas pontes/viadutos e reserva funcional para os km 15 a 21.</focus>\n");
+            sb.append("   - <method>Detalhar a estratÃ©gia fracionando a prova em trechos de 3 km, analisando a progressÃ£o do ritmo e FC a cada bloco e incorporando os acidentes altimÃ©tricos da rota: Km 0-3 em Z2 pura para aclimaÃ§Ã£o; Km 3-6 em Z2 (atenÃ§Ã£o ao Km 5 na subida da Ponte Rio Poxim com +10m de elevaÃ§Ã£o - gerenciar esforÃ§o por FC para evitar picos precoces); Km 6-9 em Z2 no plano mantendo o Pace Alvo; Km 9-12 em Z2/Z3 administrando as variaÃ§Ãµes dos viadutos e pontes da FarolÃ¢ndia; Km 12-15 em Z3 no trecho plano do Parque da Sementeira/Riomar; Km 15-18 e 18-21 em Z3/Z4 sustentado aproveitando a supercompensaÃ§Ã£o do polimento, com 100m finais livres para o pÃ³rtico de chegada.</method>\n");
+            sb.append("   - <nutrition_details>EstratÃ©gia de suplementaÃ§Ã£o intra-prova (10g-20g CHO/h): Consumir o 1Âº Gel de Carboidrato no Km 6 (logo apÃ³s a descida da Ponte Rio Poxim) e o 2Âº Gel no Km 13 (no plano do Parque da Sementeira). Obrigatoriamente ingerir ambos acompanhados de 150-200ml de Ã¡gua pura no posto de hidrataÃ§Ã£o para garantir a taxa de esvaziamento gÃ¡strico e rÃ¡pida absorÃ§Ã£o de glicose.</nutrition_details>\n");
+            sb.append("   - <justification>PrescriÃ§Ã£o oficial da prova alvo ajustada pela capacidade de endurance, perfil de altimetria e pela mÃ©dia histÃ³rica de eficiÃªncia recuperada do MySQL.</justification>\n");
+            sb.append("   - <conclusion_note>Com base na evoluÃ§Ã£o do Efficiency Index (mÃ©dias de 1.100+ em Z2/Z4), no acoplamento cardiovascular e na disciplina impecÃ¡vel do atleta Jacson Barbosa nos treinos, a preparaÃ§Ã£o estÃ¡ consolidada â€” confianÃ§a total para fazer uma grande prova!</conclusion_note>\n");
             sb.append("   - <target_scenario>1</target_scenario>\n");
-            sb.append("   - <target_level>5</target_level>\n\n");
+                        sb.append("   - <target_level>5</target_level>\n\n");
         } else {
             sb.append("SÃ¡bado normal de treino. Seguir as diretrizes padrÃ£o de progressÃ£o de NÃ­vel em 'cenario_1_aerobico'.\n\n");
         }
