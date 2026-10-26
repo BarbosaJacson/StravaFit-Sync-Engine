@@ -4,10 +4,8 @@ import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.client.TelegramClient;
 import jackson.stravafit.model.ActivitySummaryEntity;
 import jackson.stravafit.model.UserEntity;
-import jackson.stravafit.model.UserEventEntity;
 import jackson.stravafit.model.WorkoutPrescriptionEntity;
 import jackson.stravafit.repository.ActivitySummaryRepository;
-import jackson.stravafit.repository.UserEventRepository;
 import jackson.stravafit.repository.UserRepository;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,8 +18,6 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
-import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -37,7 +33,6 @@ public class WeeklyPlannerService {
     private final UserRepository userRepository;
     private final KnowledgeService knowledgeService;
     private final TelegramClient telegramClient;
-    private final UserEventRepository userEventRepository;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
 
@@ -63,59 +58,36 @@ public class WeeklyPlannerService {
     public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior() {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
-        LocalDate inicio;
-        if (hoje.getDayOfWeek() == DayOfWeek.SATURDAY || hoje.getDayOfWeek() == DayOfWeek.SUNDAY) {
-            inicio = hoje.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-        } else {
-            inicio = hoje.minusWeeks(1).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-        }
-
-        LocalDateTime inicioSemana = inicio.atStartOfDay();
+        LocalDateTime inicioSemana = hoje.with(DayOfWeek.MONDAY).atStartOfDay();
         LocalDateTime fimSemana = hoje.atTime(23, 59, 59);
 
-        log.info("[WEEKLY PLANNER] Buscando treinos da semana para o resumo entre {} e {}", inicioSemana, fimSemana);
+        log.info("[WEEKLY PLANNER] Buscando treinos da semana entre {} e {}", inicioSemana, fimSemana);
 
-        List<ActivitySummaryEntity> treinos = activitySummaryRepository
-                .findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
+        return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
+    }
 
-        if (treinos.isEmpty()) {
-            log.warn("[WEEKLY PLANNER] Nenhum treino no intervalo {}-{}. Usando fallback das últimas 3 sessões do MySQL.", inicioSemana, fimSemana);
-            treinos = activitySummaryRepository.findTop10ByDetectedScenarioOrderByStartDateDesc(1).stream().limit(3).toList();
-        }
-
-        return treinos;
+    private int determinarNivelPorEI(double mediaEI) {
+        if (mediaEI >= 1.15) return 5;
+        if (mediaEI >= 1.10) return 4;
+        if (mediaEI >= 1.05) return 3;
+        if (mediaEI >= 1.00) return 2;
+        return 1;
     }
 
     public String gerarPrescricaoSemanalIA(UserEntity user, List<ActivitySummaryEntity> treinosAnteriores) {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
-        LocalDate proximaSegunda;
-        if (hoje.getDayOfWeek() == DayOfWeek.SATURDAY || hoje.getDayOfWeek() == DayOfWeek.SUNDAY) {
-            proximaSegunda = hoje.with(TemporalAdjusters.next(DayOfWeek.MONDAY));
-        } else {
-            proximaSegunda = hoje.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-        }
+        LocalDate terca = hoje.with(DayOfWeek.TUESDAY);
+        LocalDate quinta = hoje.with(DayOfWeek.THURSDAY);
+        LocalDate sabado = hoje.with(DayOfWeek.SATURDAY);
 
-// Para garantir que a projeção da semana comece sempre a partir do dia seguinte ao sábado:
-        LocalDate terca  = proximaSegunda.with(DayOfWeek.TUESDAY);
-        LocalDate quinta = proximaSegunda.with(DayOfWeek.THURSDAY);
-        LocalDate sabado = proximaSegunda.with(DayOfWeek.SATURDAY);
+        boolean ehSemanaDaProva = sabado.equals(LocalDate.of(2026, 10, 31));
 
-        // CÁLCULO DAS SEMANAS RESTANTES PARA O EVENTO PRINCIPAL
-        LocalDate dataProvaAlvo = userEventRepository.findByUserIdAndIsMainEventTrue(user.getId())
-                .map(UserEventEntity::getEventDate)
-                .orElse(LocalDate.of(2026, 10, 31));
-
-        long diasParaProva = ChronoUnit.DAYS.between(hoje, dataProvaAlvo);
-        long semanasParaProva = Math.max(1, (diasParaProva / 7) + 1);
-
-        // 1. Histórico recente de cada cenário no MySQL
         List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
         List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
                 .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
 
-        // 2. Filtra os últimos 5 treinos específicos de cada dia
         List<ActivitySummaryEntity> ultimasTercas = listaCenario1.stream()
                 .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
                 .limit(5).toList();
@@ -127,23 +99,15 @@ public class WeeklyPlannerService {
         List<ActivitySummaryEntity> ultimosSabados = listaCenario1.stream()
                 .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
                 .limit(5).toList();
-        int nivelVigenteCenario1 = workoutPrescriptionRepository
-                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(1)
-                .map(WorkoutPrescriptionEntity::getTargetLevel)
-                .orElse(1);
 
-        int nivelVigenteCenario2 = workoutPrescriptionRepository
-                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(2)
-                .map(WorkoutPrescriptionEntity::getTargetLevel)
-                .orElse(1);
-
-        // 3. Média de Efficiency Index das 5 sessões de cada dia
         double mediaEI_Terca = ultimasTercas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
         double mediaEI_Quinta = ultimasQuintas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
         double mediaEI_Sabado = ultimosSabados.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
 
+        int nivelTerca  = determinarNivelPorEI(mediaEI_Terca);
+        int nivelQuinta = determinarNivelPorEI(mediaEI_Quinta);
+        int nivelSabado = determinarNivelPorEI(mediaEI_Sabado);
 
-        // 🎯 BASE CIENTÍFICA NO MONGODB PASSANDO O ENUM GENDER
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
 
         StringBuilder sb = new StringBuilder();
@@ -153,23 +117,23 @@ public class WeeklyPlannerService {
 
         sb.append("REGRA MANDATÓRIA DE FORMATAÇÃO: GERE O CONTEÚDO DOS CAMPOS UTILIZANDO APENAS TEXTO PURO. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN (COMO ASTERISCOS, NEGRITO, HASHTAGS OU NEGRITOS DUPLOS) DENTRO DAS TAGS XML.\n\n");
 
+        sb.append("TOM DE VOZ E EMPATIA:\n");
+        sb.append("Seja extremamente amigável, próximo e encorajador. Fale diretamente com o atleta chamando-o pelo primeiro nome (").append(user.getName()).append("). Mantenha uma postura de parceiro técnico que vibra com o progresso do atleta.\n\n");
+
         if (scientificContext != null && !scientificContext.isBlank()) {
             sb.append("--- BASE DE CONHECIMENTO CIENTÍFICO E DIRETRIZES DE PRESCRIÇÃO (MONGODB) ---\n");
             sb.append("INSTRUÇÃO DE CONSULTA: Consulte os documentos JSON abaixo e localize os parâmetros do Cenário e Nível de cada dia. Extraia exatamente o tipo de treino, a duração, a distância estimada, as faixas de FC/bpm, o foco técnico e o método detalhado.\n");
             sb.append(scientificContext).append("\n\n");
         }
 
-
         if (treinosAnteriores.isEmpty()) {
             sb.append("Nenhum treino registrado no MySQL na semana passada. Aplique os parâmetros padrão do MongoDB para retorno gradual.\n\n");
         } else {
-            // 1. Título e instrução impressos apenas UMA vez antes da lista
             sb.append("--- HISTÓRICO DE PERFORMANCE E ANÁLISES DA SEMANA ANTERIOR (TABELA MYSQL: activity_performance_summary) ---\n")
                     .append("INSTRUÇÃO DE PROCESSAMENTO DA SEMANA: Consulte e analise os registros da tabela 'activity_performance_summary' listados abaixo. ")
                     .append("Sua missão é realizar a leitura interna dos dados e do campo 'ai_analysis_summary' de cada treino executado na semana anterior e gerar EXCLUSIVAMENTE uma síntese/conclusão geral do desempenho do atleta. ")
                     .append("Não reimprima os textos ou dados individuais de cada treino no relatório final; utilize-os apenas como insumo interno para compor a visão consolidada da semana na tag <weekly_overview>.\n\n");
 
-            // 2. O laço percorre apenas os registros
             for (ActivitySummaryEntity act : treinosAnteriores) {
                 LocalDate dataTreino = act.getStartDate() != null ? act.getStartDate().toLocalDate() : hoje;
 
@@ -189,94 +153,15 @@ public class WeeklyPlannerService {
             }
             sb.append("\n");
         }
-        sb.append("--- DIRETRIZES DE AVALIAÇÃO DE NÍVEL E PRESCRIÇÃO (SISTEMA DE DECISÃO IA) ---\n");
-        sb.append("1. CONSULTA MANDATÓRIA AO MONGODB:\n");
-        sb.append("   - Para cada dia prescrito, você DEVE consultar os documentos JSON 'cenario_1_aerobico' e 'cenario_2_anaerobico_tiros' fornecidos acima.\n");
-        sb.append("   - Localize o Nível ativo indicado para o dia, varra a lista 'variacoes_estimulo' e selecione a variação EXATA cujo parâmetro 'criterio_ia' contemple a média de Efficiency Index (EI) calculada pelo sistema.\n");
-        sb.append("   - Extraia rigorosamente do JSON selecionado: 'type', 'distance_km', 'duration', 'intensity', 'focus' e 'method' (detalhando tiros/pausas se for Cenário 2).\n\n");
 
-        sb.append("--- DIRETRIZES DE AVALIAÇÃO DE NÍVEL E PRESCRIÇÃO (SISTEMA DE DECISÃO IA) ---\n");
-        sb.append("1. CONSULTA MANDATÓRIA AO MONGODB:\n");
-        sb.append("   - Para cada dia prescrito, você DEVE consultar os documentos JSON 'cenario_1_aerobico' e 'cenario_2_anaerobico_tiros' fornecidos acima.\n");
-        sb.append("   - Localize o Nível ativo indicado para o dia, varra a lista 'variacoes_estimulo' e selecione a variação EXATA cujo parâmetro 'criterio_ia' contemple a média de Efficiency Index (EI) calculada pelo sistema.\n");
-        sb.append("   - Extraia rigorosamente do JSON selecionado: 'type', 'distance_km', 'duration', 'intensity', 'focus' e 'method' (detalhando tiros/pausas se for Cenário 2).\n\n");
+        sb.append("--- DIRETRIZES DE CENÁRIO E NÍVEIS OBRIGATÓRIOS DO SISTEMA ---\n");
+        sb.append("1. TERÇA-FEIRA (").append(terca).append("): Prescrever CENÁRIO 1 no NÍVEL ").append(nivelTerca).append(" (Rodagem Leve / Z2 - FATMAX).\n");
+        sb.append("2. QUINTA-FEIRA (").append(quinta).append("): Prescrever CENÁRIO 2 no NÍVEL ").append(nivelQuinta).append(" (Intensificação / Tiros / VO2máx).\n");
 
-        sb.append("--- DIRETRIZES DE DECISÃO E SELEÇÃO DE NÍVEL (CONSULTA DINÂMICA AO JSON) ---\n");
-        sb.append("Para cada dia prescrito, você deve consultar os documentos JSON 'cenario_1_aerobico' e 'cenario_2_anaerobico_tiros' e selecionar o NÍVEL e VARIAÇÃO correspondentes avaliando as regras de 'criterio_ia' e 'gatilho_promocao' com base no Efficiency Index médio calculado pelo sistema:\n\n");
-
-        sb.append("--- ESTADO DE PROGRESSÃO E NÍVEIS ATUAIS (MYSQL -> MONGODB) ---\n");
-        sb.append("O atleta encontra-se atualmente no MySQL com os seguintes níveis ativos:\n");
-        sb.append("- Cenário 1 (Rodagens/Longão Z2): NÍVEL ").append(nivelVigenteCenario1).append("\n");
-        sb.append("- Cenário 2 (Tiros VO2máx): NÍVEL ").append(nivelVigenteCenario2).append("\n\n");
-
-        sb.append("--- ESTADO DE PROGRESSÃO E NÍVEIS ATUAIS (MYSQL -> MONGODB) ---\n");
-        sb.append("O atleta possui o seguinte histórico de níveis ativos gravados no MySQL:\n");
-        sb.append("- Cenário 1 (Rodagens/Longão Z2): NÍVEL ").append(nivelVigenteCenario1).append("\n");
-        sb.append("- Cenário 2 (Tiros VO2máx): NÍVEL ").append(nivelVigenteCenario2).append("\n\n");
-
-        sb.append("--- MÉDIAS DE EFFICIENCY INDEX (ÚLTIMAS 5 SESSÕES) ---\n");
-        sb.append("- Terça-feira (Cenário 1 - Rodagem Leve): ").append(String.format("%.3f", mediaEI_Terca)).append("\n");
-        sb.append("- Quinta-feira (Cenário 2 - Tiros Z3/Z4): ").append(String.format("%.3f", mediaEI_Quinta)).append("\n");
-        sb.append("- Sábado (Cenário 1 - Longão Z2): ").append(String.format("%.3f", mediaEI_Sabado)).append("\n\n");
-
-        sb.append("--- DIRETRIZES EXCLUSIVAS DE PRESCRIÇÃO E REGRAS DE NÍVEL ---\n");
-        sb.append("1. TERÇA-FEIRA (Rodagem Leve / FatMax):\n");
-        sb.append("   - Fisiologicamente TRAVADA no NÍVEL 1 do 'cenario_1_aerobico' (Teto máximo de 10.0 km para evitar sobrecarga no início da semana).\n");
-        sb.append("   - Avalie o EI médio das Terças (").append(String.format("%.3f", mediaEI_Terca)).append(") dentro do Nível 1:\n");
-        sb.append("     * Se EI >= 1.050: Selecione OBRIGATORIAMENTE a variação N1-V4 (Consolidação do Teto Base - 10.0 km).\n");
-        sb.append("   - Defina a tag <target_level>1</target_level>.\n\n");
-
-        sb.append("2. QUINTA-FEIRA (Tiros / VO2máx):\n");
-        sb.append("   - Consulte o Nível Ativo do Cenário 2 no MySQL (Nível ").append(nivelVigenteCenario2).append(") no 'cenario_2_anaerobico_tiros'.\n");
-        sb.append("   - Verifique na chave 'gatilho_promocao' se o EI médio (").append(String.format("%.3f", mediaEI_Quinta)).append(") promove o atleta para o próximo Nível.\n");
-        sb.append("   - Selecione a variação exata em 'variacoes_estimulo' do nível resultante conforme a regra 'criterio_ia'.\n");
-        sb.append("   - Defina a tag <target_level> com o número do nível selecionado (1 a 5).\n\n");
-
-        sb.append("3. SÁBADO (Longão de Base / Z2):\n");
-        sb.append("   - Consulte o Nível Ativo do Cenário 1 no MySQL (Nível ").append(nivelVigenteCenario1).append(") no 'cenario_1_aerobico'.\n");
-        sb.append("   - Avalie se o EI médio dos Sábados (").append(String.format("%.3f", mediaEI_Sabado)).append(") e o histórico de sessões acionam o 'gatilho_promocao' para subir de nível (ex: N1 -> N2 -> N3 -> N4 -> N5).\n");
-        sb.append("   - Mapeie a variação exata em 'variacoes_estimulo' extraindo volume, tempo e foco técnico do Longão.\n");
-        sb.append("   - Defina a tag <target_level> com o número do nível selecionado (1 a 5).\n\n");
-
-        sb.append("--- REGRA DE SELEÇÃO DE TREINO E PROMOÇÃO ---\n");
-        sb.append("1. Para cada dia, consulte o JSON correspondente no MongoDB para o Nível Ativo do cenário.\n");
-        sb.append("2. Verifique se o histórico do atleta atinge os critérios do 'gatilho_promocao' (ex: sessões consecutivas acima do limite de EI) para promover ao Nível subsequente.\n");
-        sb.append("3. Dentro do Nível selecionado (atual ou promovido), busque em 'variacoes_estimulo' a variação cuja regra 'criterio_ia' atenda o EI médio fornecido.\n");
-        sb.append("4. Preencha a tag <target_level> com o número exato do Nível (1 a 5) selecionado para gravação no MySQL.\n\n");
-        sb.append("3. TRAVA DE INTEGRIDADE:\n");
-        sb.append("   - É ESTRITAMENTE PROIBIDO inventar faixas de distância, tempos de tiro ou repetições que não constem expressamente nas estruturas 'variacoes_estimulo' do MongoDB para o nível selecionado.\n\n");
-
-        sb.append("1. CONSULTA AO MACROCICLO DA MEIA MARATONA ('macro_ciclo_meia_maratona_2026'):\n");
-        sb.append("   • Com base nas ").append(semanasParaProva).append(" semanas restantes para o evento de ").append(dataProvaAlvo).append(":\n");
-        sb.append("     - Identifique a chave de fase correspondente no JSON ('semanas_restantes_4_a_3' ou 'semanas_restantes_2_a_1').\n");
-        sb.append("     - Aplique obrigatoriamente as orientações de 'foco_longao' / 'foco_volume', 'fortalecimento_e_prevencao' e 'cuidados_fisiologicos' da fase ativa no campo <focus> e <method> de cada prescrição.\n");
-        sb.append("     - Na tag <weekly_overview>, faça a síntese do desempenho da semana anterior do MySQL correlacionando diretamente o estado do atleta com a fase do macrociclo descrita no documento.\n\n");
-
-        boolean ehSemanaDaProva = sabado.equals(dataProvaAlvo);
-
-        sb.append("--- REGRA ESPECIAL DE PROVA ALVO (MEIA MARATONA - 31/10/2026) ---\n");
-        sb.append("Consulte o documento chave 'evento_meia_maratona_2026' na base de conhecimento do MongoDB fornecida acima.\n\n");
         if (ehSemanaDaProva) {
-            sb.append("🚨 ATENÇÃO IA - GATILHO DE PROVA ATIVADO PARA SÁBADO (31/10/2026):\n");
-            sb.append("1. O próximo sábado NÃO é um treino comum. É o dia da MEIA MARATONA OFICIAL (21.1 km) do atleta Jacson Barbosa.\n");
-            sb.append("2. SUBSTITUA o treino convencional do 'cenario_1_aerobico' pela prescrição tática da prova.\n");
-            sb.append("3. CONSULTA OBRIGATÓRIA AO MYSQL (activity_performance_summary):\n");
-            sb.append("   - Analise os treinos de Longão (Sábados) do MySQL e extraia a média do Efficiency Index (EI) e o Pace Médio das melhores sessões em Nível 4 e 5.\n");
-            sb.append("   - Calcule o Pace Alvo de Prova recomendado (min/km) e o tempo total estimado de prova para cobrir os 21.097 km.\n");
-            sb.append("4. PREENCHIMENTO DA TAG <prescription> DO SÁBADO (31/10/2026):\n");
-            sb.append("   - <type>PROVA OFICIAL - MEIA MARATONA (21.1 KM)</type>\n");
-            sb.append("   - <distance_km>21.1</distance_km>\n");
-            sb.append("   - <duration>[Informe o tempo total estimado calculado ex: 130 a 135 minutos]</duration>\n");
-            sb.append("   - <intensity>Gestão Z2 no início (125-139 bpm) progredindo para Z3/Z4 nos km finais</intensity>\n");
-            sb.append("   - <focus>Execução do plano de prova de 21.1 km. Controle rigoroso de pacing, hidratação constante, gestão de altimetria nas pontes/viadutos e reserva funcional para os km 15 a 21.</focus>\n");
-            sb.append("   - <method>Detalhar a estratégia fracionando a prova em trechos de 3 km, analisando a progressão do ritmo e FC a cada bloco e incorporando os acidentes altimétricos da rota: Km 0-3 em Z2 pura para aclimação; Km 3-6 em Z2 (atenção ao Km 5 na subida da Ponte Rio Poxim com +10m de elevação - gerenciar esforço por FC para evitar picos precoces); Km 6-9 em Z2 no plano mantendo o Pace Alvo; Km 9-12 em Z2/Z3 administrando as variações dos viadutos e pontes da Farolândia; Km 12-15 em Z3 no trecho plano do Parque da Sementeira/Riomar; Km 15-18 e 18-21 em Z3/Z4 sustentado aproveitando a supercompensação do polimento, com 100m finais livres para o pórtico de chegada.</method>\n");
-            sb.append("   - <nutrition_details>Estratégia de suplementação intra-prova (10g-20g CHO/h): Consumir o 1º Gel de Carboidrato no Km 6 (logo após a descida da Ponte Rio Poxim) e o 2º Gel no Km 13 (no plano do Parque da Sementeira). Obrigatoriamente ingerir ambos acompanhados de 150-200ml de água pura no posto de hidratação para garantir a taxa de esvaziamento gástrico e rápida absorção de glicose.</nutrition_details>\n");
-            sb.append("   - <justification>Prescrição oficial da prova alvo ajustada pela capacidade de endurance, perfil de altimetria e pela média histórica de eficiência recuperada do MySQL.</justification>\n");
-            sb.append("   - <conclusion_note>Com base na evolução do Efficiency Index (médias de 1.100+ em Z2/Z4), no acoplamento cardiovascular e na disciplina impecável do atleta Jacson Barbosa nos treinos, a preparação está consolidada — confiança total para fazer uma grande prova!</conclusion_note>\n");
-            sb.append("   - <target_scenario>1</target_scenario>\n");
-                        sb.append("   - <target_level>5</target_level>\n\n");
+            sb.append("3. SÁBADO (").append(sabado).append("): GATILHO DE PROVA ATIVADO (31/10/2026). MEIA MARATONA OFICIAL (21.1 km).\n\n");
         } else {
-            sb.append("Sábado normal de treino. Seguir as diretrizes padrão de progressão de Nível em 'cenario_1_aerobico'.\n\n");
+            sb.append("3. SÁBADO (").append(sabado).append("): Prescrever CENÁRIO 1 no NÍVEL ").append(nivelSabado).append(" (Longão / Rodagem de Base - Zona 2).\n\n");
         }
 
         sb.append("FORMATO DE SAÍDA EXIGIDO:\n");
@@ -295,7 +180,7 @@ public class WeeklyPlannerService {
         sb.append("    <method>[Descrição detalhada do método conforme MongoDB]</method>\n");
         sb.append("    <justification>[Justificativa fisiológica da escolha]</justification>\n");
         sb.append("    <target_scenario>1</target_scenario>\n");
-        sb.append("    <target_level>[Número do Nível de 1 a 5 identificado dinamicamente no MongoDB para este EI]</target_level>\n");
+        sb.append("    <target_level>").append(nivelTerca).append("</target_level>\n");
         sb.append("  </prescription>\n");
 
         sb.append("  <prescription>\n");
@@ -305,24 +190,100 @@ public class WeeklyPlannerService {
         sb.append("    <duration>[Duração em minutos conforme MongoDB]</duration>\n");
         sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
         sb.append("    <focus>[Foco técnico do nível no MongoDB]</focus>\n");
-        sb.append("    <method>[Detalhamento de Séries, Tiros, Pausas e Zonas conforme MongoDB]</method>\n");
+        sb.append("    <method>[Faça o detalhamento de Séries de forma amigável com o atleta sem muita formalidade,especifique os Tiros, Pausas e Zonas conforme MongoDB]</method>\n");
         sb.append("    <justification>[Justificativa fisiológica da escolha dos tiros]</justification>\n");
         sb.append("    <target_scenario>2</target_scenario>\n");
-        sb.append("    <target_level>[Número do Nível de 1 a 5 identificado dinamicamente no MongoDB para este EI]</target_level>\n");
+        sb.append("    <target_level>").append(nivelQuinta).append("</target_level>\n");
         sb.append("  </prescription>\n");
 
-        sb.append("  <prescription>\n");
-        sb.append("    <scheduled_date>").append(sabado).append("</scheduled_date>\n");
-        sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
-        sb.append("    <distance_km>[Distância conforme MongoDB ex: 16.0]</distance_km>\n");
-        sb.append("    <duration>[Duração em minutos conforme MongoDB]</duration>\n");
-        sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
-        sb.append("    <focus>[Foco técnico do nível no MongoDB]</focus>\n");
-        sb.append("    <method>[Descrição detalhada do método do Longão conforme MongoDB]</method>\n");
-        sb.append("    <justification>[Justificativa fisiológica do volume]</justification>\n");
-        sb.append("    <target_scenario>1</target_scenario>\n");
-        sb.append("    <target_level>[Número do Nível de 1 a 5 identificado dinamicamente no MongoDB para este EI]</target_level>\n");
-        sb.append("  </prescription>\n");
+        if (ehSemanaDaProva) {
+            sb.append("  <prescription>\n");
+            sb.append("    <scheduled_date>").append(sabado).append("</scheduled_date>\n");
+            sb.append("    <type>PROVA OFICIAL - MEIA MARATONA (21.1 KM)</type>\n");
+            sb.append("    <distance_km>21.1</distance_km>\n");
+            sb.append("    <duration>130 a 135 minutos (2h10min a 2h15min)</duration>\n");
+            sb.append("    <intensity>Gestão Z2 no início (125-139 bpm) progredindo para Z3/Z4 sustentado nos km finais</intensity>\n");
+            sb.append("    <focus>Execução do plano de prova de 21.1 km. Controle rigoroso de pacing, hidratação constante, gestão de altimetria nas pontes/viadutos e reserva funcional para os km 15 a 21.</focus>\n");
+            sb.append("    <method>FASE 1 — KM 0 AO KM 3\n");
+            sb.append("OBJETIVO DO TRECHO\nAclimação, adaptação às condições ambientais, controle de ansiedade e acomodação no pelotão em Z2 pura.\n");
+            sb.append("PACE PLANEJADO\nFaixa de 6:25 a 6:35 min/km. Priorize estabilizar a passada em ritmo confortável sem acelerar para compensar a largada.\n");
+            sb.append("FREQUÊNCIA CARDÍACA\nZ2 (125 a 139 bpm). Caso a FC ultrapasse 139 bpm por ansiedade, reduza levemente a passada até a estabilização.\n");
+            sb.append("PREPARAÇÃO PARA A ALTIMETRIA\nTrecho inicial plano de asfalto urbano. Aproveite a ausência de aclives para estabelecer cadência estável.\n");
+            sb.append("NUTRIÇÃO E HIDRATAÇÃO\nHidratação preventiva nos postos com pequenos goles de água pura (100-150 ml) sem interromper a passada.\n");
+            sb.append("CRITÉRIO PARA A PRÓXIMA FASE\nFC estabilizada em Z2, respiração ritmada e sensação de esforço leve a moderado.\n\n");
+
+            sb.append("FASE 2 — KM 3 AO KM 6\n");
+            sb.append("OBJETIVO DO TRECHO\nManutenção do ritmo de base aeróbica em Z2 e gestão consciente do primeiro acidente altimétrico do percurso.\n");
+            sb.append("PACE PLANEJADO\nFaixa de 6:15 a 6:25 min/km no plano. Aceite perda momentânea de velocidade na subida para preservar glicogênio.\n");
+            sb.append("FREQUÊNCIA CARDÍACA\nZ2 (125 a 139 bpm). Gerencie o esforço pela FC durante o aclive para evitar picos precoces de acidose.\n");
+            sb.append("PREPARAÇÃO PARA A ALTIMETRIA\nSubida da Ponte Rio Poxim no Km 5.2 (+9.7m de elevação). Encurte a passada, aumente a cadência e use a descida para soltar as pernas.\n");
+            sb.append("NUTRIÇÃO E HIDRATAÇÃO\nConsumo do 1º Gel de Carboidrato (20g CHO) no Km 6, obrigatoriamente acompanhado de 150-200 ml de água no posto de hidratação.\n");
+            sb.append("CRITÉRIO PARA A PRÓXIMA FASE\nRecuperação completa da FC para Z2 após a descida da ponte e tolerância gastrointestinal perfeita ao gel.\n\n");
+
+            sb.append("FASE 3 — KM 6 AO KM 9\n");
+            sb.append("OBJETIVO DO TRECHO\nEstabilização no ritmo alvo de cruzeiro na Av. Beira Mar, consolidando a eficiência metabólica em Z2.\n");
+            sb.append("PACE PLANEJADO\nFaixa de 6:10 a 6:20 min/km. Mantenha a regularidade do ritmo aproveitando a topografia favorável.\n");
+            sb.append("FREQUÊNCIA CARDÍACA\nZ2 (125 a 139 bpm). Se a FC indicar elevação contínua sem ganho de velocidade, reduza 5 segundos no pace.\n");
+            sb.append("PREPARAÇÃO PARA A ALTIMETRIA\nTrecho totalmente plano da Av. Beira Mar. Foco na postura, relaxamento dos ombros e economia de corrida.\n");
+            sb.append("NUTRIÇÃO E HIDRATAÇÃO\nManutenção da hidratação com água nos postos disponíveis a cada 2 km ou 3 km conforme necessidade térmica.\n");
+            sb.append("CRITÉRIO PARA A PRÓXIMA FASE\nAusência de desacoplamento cardiovascular relevante e bom acoplamento neuromuscular mantido.\n\n");
+
+            sb.append("FASE 4 — KM 9 AO KM 12\n");
+            sb.append("OBJETIVO DO TRECHO\nTransição gradual para Z3, administrando as variações altimétricas da região da Farolândia sem comprometer o final.\n");
+            sb.append("PACE PLANEJADO\nFaixa de 6:05 a 6:15 min/km. Ajuste o esforço nos aclives e busque regularidade imediata no plano.\n");
+            sb.append("FREQUÊNCIA CARDÍACA\nTransição Z2 para Z3 (138 a 145 bpm). Monitore a resposta tensional antes de autorizar aumento do ritmo.\n");
+            sb.append("PREPARAÇÃO PARA A ALTIMETRIA\nRetorno da Farolândia (+8.8m no Km 9.6) e Viaduto Maria do Carmo (+8.8m no Km 11.5). Controle a amplitude de passada na subida.\n");
+            sb.append("NUTRIÇÃO E HIDRATAÇÃO\nGoles curtos de água nos postos para manter o equilíbrio hídrico e preencher o estômago antes do segundo gel.\n");
+            sb.append("CRITÉRIO PARA A PRÓXIMA FASE\nCapacidade sustentada de manter o ritmo em Z3 sem sensação de estafa muscular precoce.\n\n");
+
+            sb.append("FASE 5 — KM 12 AO KM 15\n");
+            sb.append("OBJETIVO DO TRECHO\nSustentação de ritmo firme em Z3 e superação do trecho crítico do percurso com estratégia nutricional alinhada.\n");
+            sb.append("PACE PLANEJADO\nFaixa de 6:00 a 6:10 min/km. Progrida o ritmo com segurança caso a resposta metabólica permaneça positiva.\n");
+            sb.append("FREQUÊNCIA CARDÍACA\nZ3 (140 a 152 bpm). Aceite a subida da FC compatível com a intensidade, evitando ultrapassar 155 bpm nesta fase.\n");
+            sb.append("PREPARAÇÃO PARA A ALTIMETRIA\nPonte Godofredo Diniz (+10.5m de elevação no Km 14.7) seguida do plano do Parque da Sementeira / Riomar.\n");
+            sb.append("NUTRIÇÃO E HIDRATAÇÃO\nConsumo do 2º Gel de Carboidrato (20g CHO) no Km 13 no plano, acompanhado obrigatoriamente por 150-200 ml de água pura.\n");
+            sb.append("CRITÉRIO PARA A PRÓXIMA FASE\nAbsorção adequada dos carboidratos e estabilidade muscular para iniciar a progressão final de prova.\n\n");
+
+            sb.append("FASE 6 — KM 15 AO KM 18\n");
+            sb.append("OBJETIVO DO TRECHO\nIntensificação em Z3 Superior na Av. Delmiro Gouveia, aplicando o Negative Split caso haja reserva funcional suficiente.\n");
+            sb.append("PACE PLANEJADO\nFaixa de 5:55 a 6:05 min/km. Aceleração progressiva e consciente sustentada no plano.\n");
+            sb.append("FREQUÊNCIA CARDÍACA\nZ3 Superior (148 a 155 bpm). Se houver sinais de fadiga excessiva ou dor, mantenha um esforço sustentável em Z3.\n");
+            sb.append("PREPARAÇÃO PARA A ALTIMETRIA\nPlano contínuo na Av. Delmiro Gouveia. Terreno ideal para imprimir ritmo constante de velocidade.\n");
+            sb.append("NUTRIÇÃO E HIDRATAÇÃO\nHidratação de apoio com água para enxágue bucal e conforto térmico nos pontos de suporte.\n");
+            sb.append("CRITÉRIO PARA A PRÓXIMA FASE\nFoco mental elevado, ausência de cãibras e margem cardiovascular para o ataque final na Orla.\n\n");
+
+            sb.append("FASE 7 — KM 18 ATÉ A CHEGADA, NO KM 21,097\n");
+            sb.append("OBJETIVO DO TRECHO\nAproveitamento da supercompensação do polimento na Orla de Atalaia, acelerando com segurança até o pórtico de chegada.\n");
+            sb.append("PACE PLANEJADO\nAbaixo de 5:55 min/km no trecho geral, com 100 metros finais livres de sprint para a linha de chegada.\n");
+            sb.append("FREQUÊNCIA CARDÍACA\nZ3 Superior / Z4 sustentado (155 a 165+ bpm). Aceleração sujeita ao estado muscular e cardiovascular real do atleta.\n");
+            sb.append("PREPARAÇÃO PARA A ALTIMETRIA\nTrecho plano da Orla de Atalaia até a reta final de chegada. Ventos laterais moderados podem exigir foco na postura.\n");
+            sb.append("NUTRIÇÃO E HIDRATAÇÃO\nGoles pontuais de água se necessário para alívio do ressecamento bucal nos quilômetros finais.\n");
+            sb.append("CRITÉRIO PARA A PRÓXIMA FASE\nConclusão oficial dos 21,097 km da prova com travessia segura da linha de chegada e desaceleração gradual.</method>\n");
+            sb.append("    <justification>Prescrição oficial da prova alvo ajustada pela capacidade de endurance, perfil de altimetria e pela média histórica de eficiência recuperada do MySQL.</justification>\n");
+            sb.append("    <target_scenario>1</target_scenario>\n");
+            sb.append("    <target_level>5</target_level>\n");
+            sb.append("  </prescription>\n");
+        } else {
+            sb.append("  <prescription>\n");
+            sb.append("    <scheduled_date>").append(sabado).append("</scheduled_date>\n");
+            sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
+            sb.append("    <distance_km>[Distância conforme MongoDB ex: 16.0]</distance_km>\n");
+            sb.append("    <duration>[Duração em minutos conforme MongoDB]</duration>\n");
+            sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
+            sb.append("    <focus>[Foco técnico do nível no MongoDB]</focus>\n");
+            sb.append("    <method>[Descrição detalhada do método do Longão conforme MongoDB]</method>\n");
+            sb.append("    <justification>[Justificativa fisiológica do volume]</justification>\n");
+            sb.append("    <target_scenario>1</target_scenario>\n");
+            sb.append("    <target_level>").append(nivelSabado).append("</target_level>\n");
+            sb.append("  </prescription>\n");
+        }
+
+        // 🎯 OBRIGATÓRIO: NÓ DE CONCLUSÃO E MOTIVAÇÃO
+        sb.append("  <weekly_conclusion>")
+                .append("Escreva um texto motivador de 3 a 5 linhas parabenizando o atleta ")
+                .append(user.getName())
+                .append(" pela dedicação contínua no ciclo de treinos, fazendo um breve resumo da sua prontidão para a Meia Maratona e desejando excelente prova com muita energia e foco!")
+                .append("</weekly_conclusion>\n");
 
         sb.append("</weekly_prescription>\n");
 
@@ -339,10 +300,10 @@ public class WeeklyPlannerService {
         msgTelegram.append("📅 PLANEJAMENTO SEMANAL STRAFIT\n");
         msgTelegram.append("Atleta: ").append(user.getName()).append("\n\n");
 
-        String overview = sanitizeText(extractTagValue(rawXml, "weekly_overview"));
+        String overview = extractTagValue(rawXml, "weekly_overview");
         if (overview != null && !overview.isBlank()) {
             msgTelegram.append("📊 RESUMO DA SEMANA ANTERIOR:\n")
-                    .append(overview).append("\n\n")
+                    .append(sanitizeText(overview)).append("\n\n")
                     .append("------------------------------------\n\n");
         }
 
@@ -377,14 +338,21 @@ public class WeeklyPlannerService {
                 }
             }
 
-            String method = sanitizeText(extractTagValue(block, "method"));
-            String justification = sanitizeText(extractTagValue(block, "justification"));
+            String rawMethod = extractTagValue(block, "method");
+            String justification = extractTagValue(block, "justification");
+
+            String methodCompleto = "";
+            if (rawMethod != null && !rawMethod.isBlank()) {
+                methodCompleto = rawMethod.replaceAll("[*#`]", "").trim();
+                // Formatação defensiva caso o método venha em parágrafo único sem quebra
+                methodCompleto = methodCompleto.replaceAll("(?i)(FASE \\d+ —)", "\n\n$1").trim();
+            }
 
             if (justification != null && !justification.isBlank()) {
-                prescription.setMethod(method + "\n\n💡 Justificativa Técnica: " + justification);
-            } else {
-                prescription.setMethod(method);
+                methodCompleto += "\n\n💡 Justificativa Técnica: " + sanitizeText(justification);
             }
+
+            prescription.setMethod(methodCompleto);
 
             String targetScenarioStr = extractTagValue(block, "target_scenario");
             String targetLevelStr = extractTagValue(block, "target_level");
@@ -399,21 +367,30 @@ public class WeeklyPlannerService {
             workoutPrescriptionRepository.save(prescription);
             log.info("[WEEKLY PLANNER] Prescrição salva no MySQL para a data: {}", scheduledDate);
 
-            // Monta o resumo formatado em Texto Puro para o Telegram
             msgTelegram.append("📌 ").append(scheduledDate.getDayOfWeek().toString()).append(" (").append(scheduledDate).append(")\n")
                     .append("• Treino: ").append(prescription.getType()).append(" | Nível ").append(level).append("\n")
                     .append("• Volume / Distância: ").append(distanceStr != null ? distanceStr + " km" : "N/A").append(" (").append(prescription.getDuration()).append(")\n")
                     .append("• Intensidade: ").append(prescription.getIntensity()).append("\n")
-                    .append("• Estrutura / Método: ").append(method).append("\n")
-                    .append("• Foco Técnico: ").append(prescription.getFocus()).append("\n\n");
+                    .append("• Foco Técnico: ").append(prescription.getFocus()).append("\n\n")
+                    .append("• Estrutura / Método:\n").append(methodCompleto).append("\n\n")
+                    .append("------------------------------------\n\n");
         }
 
-        telegramClient.sendMessage(sanitizeText(msgTelegram.toString()));
+        // 🎯 EXTRAÇÃO E ANEXO DO BLOCO FINAL DE MOTIVAÇÃO E CONCLUSÃO
+        String conclusion = extractTagValue(rawXml, "weekly_conclusion");
+        if (conclusion != null && !conclusion.isBlank()) {
+            msgTelegram.append("🚀 CONCLUSÃO E MOTIVAÇÃO:\n")
+                    .append(sanitizeText(conclusion)).append("\n\n")
+                    .append("------------------------------------\n\n");
+        }
+
+        telegramClient.sendMessage(msgTelegram.toString());
         log.info("[WEEKLY PLANNER] Notificação enviada para o Telegram.");
     }
 
     private String extractTagValue(String xml, String tag) {
-        Pattern pattern = Pattern.compile("<" + tag + ">(.*?)</" + tag + ">");
+        if (xml == null || tag == null) return null;
+        Pattern pattern = Pattern.compile("<" + tag + ">(.*?)</" + tag + ">", Pattern.DOTALL);
         Matcher matcher = pattern.matcher(xml);
         if (matcher.find()) {
             return matcher.group(1).trim();
