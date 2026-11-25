@@ -110,6 +110,9 @@ public class SyncScheduler {
                 StravaActivity activity = treinoPendente.get();
                 log.info("-> NOVO TREINO DETECTADO PARA ANÁLISE: {} (ID: {}) | Atleta: {}", activity.getName(), activity.getId(), user.getName());
                 processarEEnviar(user, activity);
+            } else {
+                log.info("-> Nenhum treino novo pendente para {}. Verificando último insight...", user.getName());
+                enviarLembreteUltimoInsight(user);
             }
 
         } catch (HttpClientErrorException.Unauthorized e) {
