@@ -26,4 +26,11 @@ public interface ActivitySummaryRepository extends JpaRepository<ActivitySummary
     // Busca os sumários de treino realizados em um intervalo de datas (ex: Segunda a Domingo da semana passada)
     List<ActivitySummaryEntity> findByStartDateBetweenOrderByStartDateAsc(LocalDateTime start, LocalDateTime end);
 
+    @Query(value = "SELECT * FROM activity_performance_summary WHERE user_id = :userId AND dominant_zone = :dominantZone ORDER BY start_date DESC LIMIT 10", nativeQuery = true)
+    List<ActivitySummaryEntity> findTop10ByUserIdAndDominantZoneOrderByStartDateDesc(@Param("userId") Long userId, @Param("dominantZone") int dominantZone);
+
+    List<ActivitySummaryEntity> findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(Long userId, Integer detectedScenario);
+
+    List<ActivitySummaryEntity> findByUserIdAndStartDateBetweenOrderByStartDateAsc(Long userId, LocalDateTime start, LocalDateTime end);
+
 }

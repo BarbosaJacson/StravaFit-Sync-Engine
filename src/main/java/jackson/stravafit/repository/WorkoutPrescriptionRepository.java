@@ -19,4 +19,12 @@ public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPres
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
 
     Optional<WorkoutPrescriptionEntity> findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Integer targetScenario);
+
+    Optional<WorkoutPrescriptionEntity> findByUserIdAndScheduledDate(Long userId, LocalDate scheduledDate);
+
+    Optional<WorkoutPrescriptionEntity> findTopByUserIdAndScheduledDateOrderByCreatedAtDesc(Long userId, LocalDate scheduledDate);
+
+    Optional<WorkoutPrescriptionEntity> findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(Long userId, LocalDate scheduledDate);
+
+    Optional<WorkoutPrescriptionEntity> findTopByUserIdAndTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Long userId, Integer targetScenario);
 }

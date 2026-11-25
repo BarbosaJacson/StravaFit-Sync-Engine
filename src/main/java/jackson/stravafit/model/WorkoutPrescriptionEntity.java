@@ -19,6 +19,10 @@ public class WorkoutPrescriptionEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
+
     // ID da atividade Strava para a qual esta prescrição foi gerada (após a análise desta atividade)
     @Column(name = "activity_id", nullable = true)
     private Long activityId;

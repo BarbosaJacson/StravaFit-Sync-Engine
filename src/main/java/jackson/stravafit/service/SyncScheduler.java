@@ -39,13 +39,6 @@ public class SyncScheduler {
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     @Value("${strava.auto-start:false}")
     private boolean autoStart;
-
-    @Value("${strava.access.token}")
-    private String accessToken;
-
-    @Value("${strava.refresh.token}")
-    private String refreshToken;
-
     @EventListener(ApplicationReadyEvent.class)
     public void autoExecutarNoStartup() {
         if (autoStart) {
@@ -59,15 +52,41 @@ public class SyncScheduler {
     @Async
     public void executarSincronizacao() {
         log.info("\n=== [MOTOR] Sincronização sob demanda iniciada ===");
+        List<UserEntity> usuarios = userRepository.findAll().stream()
+                .filter(u -> u.getStravaAccessToken() != null && !u.getStravaAccessToken().isBlank())
+                .toList();
+
+        if (usuarios.isEmpty()) {
+            log.warn("[MOTOR] Nenhum usuário com token Strava configurado no banco.");
+            return;
+        }
+
+        for (UserEntity user : usuarios) {
+            sincronizarUsuario(user);
+        }
+    }
+
+    @Async
+    public void executarSincronizacaoPorAtleta(Long stravaAthleteId) {
+        log.info("\n=== [MOTOR] Sincronização por Webhook para atleta Strava ID: {} ===", stravaAthleteId);
+        userRepository.findByStravaAthleteId(stravaAthleteId)
+                .ifPresentOrElse(
+                        this::sincronizarUsuario,
+                        () -> log.warn("[WEBHOOK] Nenhum usuário cadastrado com stravaAthleteId: {}", stravaAthleteId)
+                );
+    }
+
+    private void sincronizarUsuario(UserEntity user) {
         try {
-            ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(this.accessToken, 1);
+            ActivityService.ActivityPageResponse response =
+                    activityService.getActivitiesWithHeartRate(user.getStravaAccessToken(), 1);
+
             if (response.activities().isEmpty()) {
-                log.warn("   [STRAVA] Nenhuma atividade compatível encontrada recentemente.");
-                enviarLembreteUltimoInsight();
+                log.warn("   [STRAVA] Nenhuma atividade compatível encontrada para {}.", user.getName());
+                enviarLembreteUltimoInsight(user);
                 return;
             }
 
-            // 1. Garante ordenação decrescente rigorosa por data antes de qualquer filtro
             List<StravaActivity> atividadesOrdenadas = response.activities().stream()
                     .sorted(Comparator.comparing(
                             act -> parseDate(act.getStartDateLocal()),
@@ -75,71 +94,63 @@ public class SyncScheduler {
                     ))
                     .toList();
 
-// 2. Busca a PRIMEIRA (mais recente) atividade elegível
             Optional<StravaActivity> treinoPendente = atividadesOrdenadas.stream()
                     .filter(activity -> {
                         Optional<ActivityEntity> entityOpt = activityRepository.findById(activity.getId());
-
-                        // Se não existe no banco MySQL -> É um treino novo!
                         if (entityOpt.isEmpty()) {
                             return true;
                         }
-
-                        // Se existe no banco, reprocessa APENAS se for recente (últimos 7 dias) e estiver SEM insight válido
                         ActivityEntity entity = entityOpt.get();
                         boolean recente = isActivityRecent(activity.getStartDateLocal(), 7);
                         return recente && !isValidInsight(entity.getGeminiInsight());
                     })
                     .findFirst();
+
             if (treinoPendente.isPresent()) {
                 StravaActivity activity = treinoPendente.get();
-                log.info("-> NOVO TREINO DETECTADO PARA ANÁLISE: {} (ID: {})", activity.getName(), activity.getId());
-                processarEEnviar(this.accessToken, activity);
+                log.info("-> NOVO TREINO DETECTADO PARA {}: {} (ID: {})", user.getName(), activity.getName(), activity.getId());
+                processarEEnviar(user, activity);
             } else {
-                log.info("-> Todos os treinos recentes do Strava já estão processados no MySQL. Acionando fallback...");
-                enviarLembreteUltimoInsight();
+                log.info("-> Todos os treinos recentes de {} já estão processados no MySQL. Acionando fallback...", user.getName());
+                enviarLembreteUltimoInsight(user);
             }
 
         } catch (HttpClientErrorException.Unauthorized e) {
-            if (renovarToken()) {
-                executarSincronizacao();
+            if (renovarToken(user)) {
+                sincronizarUsuario(user);
             } else {
-                log.error("ERRO CRÍTICO: Falha na renovação do token. Sincronização abortada.");
+                log.error("ERRO CRÍTICO: Falha na renovação do token para {}. Sincronização abortada.", user.getName());
             }
         } catch (Exception e) {
-            log.error("ERRO NA SINCRONIZAÇÃO: {}", e.getMessage());
+            log.error("ERRO NA SINCRONIZAÇÃO de {}: {}", user.getName(), e.getMessage());
         }
     }
 
-    private void processarEEnviar(String token, StravaActivity activity) {
+    private void processarEEnviar(UserEntity user, StravaActivity activity) {
         try {
-            // 🎯 Busca as métricas do atleta no MySQL (ID 1)
-            UserEntity user = userRepository.findById(1L)
-                    .orElseThrow(() -> new IllegalStateException("Atleta principal não cadastrado no MySQL."));
-
             int hrMax = user.getHrMax();
             int hrResting = user.getHrResting();
 
-            List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.getId());
+            List<StravaActivity.ActivityStream> streams =
+                    activityService.getActivityStreams(user.getStravaAccessToken(), activity.getId());
 
-            // 🎯 Repassa hrMax e hrResting para a agregação por minuto
-            List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, null, hrMax, hrResting);
+            List<StravaActivity.MinuteAnalysis> minuteAnalysis =
+                    activityService.aggregateStreamsByMinute(streams, null, hrMax, hrResting);
 
             String insight = insightService.getActivityInsight(activity, minuteAnalysis);
 
-            // 🎯 Repassa hrMax e hrResting para o resumo da zona dominante
-            String zonaDominante = activityService.calculateDominantZoneSummary(activityService.getHeartRateStream(streams), hrMax, hrResting);
+            String zonaDominante = activityService.calculateDominantZoneSummary(
+                    activityService.getHeartRateStream(streams), hrMax, hrResting);
 
             if (isValidInsight(insight)) {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
-                activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
+                activityService.saveActivity(user, activity, minuteAnalysis, zonaDominante, insight);
                 log.info("   [TELEGRAM] Análise do novo treino enviada.");
 
-                // 🎯 GATILHO REATIVO: Se o treino for no sábado, dispara o planejamento da próxima semana
                 try {
                     if (activity.getStartDateLocal() != null) {
                         String dateStr = activity.getStartDateLocal().replace("Z", "");
-                        java.time.LocalDateTime startDate = java.time.LocalDateTime.parse(
+                        LocalDateTime startDate = LocalDateTime.parse(
                                 dateStr, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
                         if (startDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY) {
@@ -153,25 +164,49 @@ public class SyncScheduler {
 
             } else {
                 log.warn("   [GEMINI] Falha temporária. Atividade salva sem insight.");
-                activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
+                activityService.saveActivity(user, activity, minuteAnalysis, zonaDominante, null);
             }
         } catch (Exception e) {
             log.error("Erro ao processar e enviar atividade {}: {}", activity.getId(), e.getMessage(), e);
         }
     }
 
-    private void enviarLembreteUltimoInsight() {
-        activityRepository.findTopByOrderByStartDateDesc().ifPresentOrElse(activity -> {
+    private void enviarLembreteUltimoInsight(UserEntity user) {
+        activityRepository.findTopByUserIdOrderByStartDateDesc(user.getId()).ifPresentOrElse(activity -> {
             if (isValidInsight(activity.getGeminiInsight())) {
                 String lembrete = "RELEMBRANDO ÚLTIMO TREINO: " + activity.getName() + "\n\n" + activity.getGeminiInsight();
                 telegramClient.sendMessage(lembrete);
-                log.info("   [TELEGRAM] Fallback executado: Último insight reenviado para o Telegram.");
+                log.info("   [TELEGRAM] Fallback executado para {}: Último insight reenviado.", user.getName());
             } else {
-                log.info("   [FALLBACK] A última atividade no banco não possui um insight válido para reenvio.");
+                log.info("   [FALLBACK] A última atividade de {} não possui um insight válido para reenvio.", user.getName());
             }
-        }, () -> log.warn("   [FALLBACK] Nenhum treino encontrado no banco de dados para reenvio."));
+        }, () -> log.warn("   [FALLBACK] Nenhum treino encontrado no banco para {}.", user.getName()));
+    }
+    private boolean isActivityRecent(String dateStr, int maxDays) {
+        java.time.LocalDateTime activityDate = parseDate(dateStr);
+        if (activityDate.equals(java.time.LocalDateTime.MIN)) {
+            return false;
+        }
+        java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(maxDays);
+        return activityDate.isAfter(cutoffDate);
     }
 
+    private boolean renovarToken(UserEntity user) {
+        try {
+            TokenResponse novoToken = authService.refreshToken(user.getStravaRefreshToken());
+            user.setStravaAccessToken(novoToken.getAccessToken());
+            if (novoToken.getRefreshToken() != null) {
+                user.setStravaRefreshToken(novoToken.getRefreshToken());
+            }
+            user.setStravaTokenExpiresAt(novoToken.getExpiresAt());
+            userRepository.save(user);
+            log.info("Token Strava renovado e salvo no MySQL para {}.", user.getName());
+            return true;
+        } catch (Exception e) {
+            log.error("ERRO CRÍTICO na renovação do token de {}: {}", user.getName(), e.getMessage());
+            return false;
+        }
+    }
     private boolean isValidInsight(String insight) {
         return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
     }
@@ -183,12 +218,11 @@ public class SyncScheduler {
         try {
             String normalized = dateStr.replace("Z", "");
 
-            // CORREÇÃO AQUI: Verifica se há fuso horário (-03:00) procurando o hífen após a data (posição > 10)
             boolean hasOffset = normalized.contains("+") ||
                     (normalized.lastIndexOf("-") > 10);
 
             if (hasOffset) {
-                return java.time.OffsetDateTime.parse(dateStr)
+                return OffsetDateTime.parse(dateStr)
                         .atZoneSameInstant(ZONE_SP)
                         .toLocalDateTime();
             }
@@ -196,27 +230,6 @@ public class SyncScheduler {
         } catch (Exception e) {
             log.warn("[SYNC-PARSER] Falha ao converter data '{}': {}", dateStr, e.getMessage());
             return LocalDateTime.MIN;
-        }
-    }
-
-    private boolean isActivityRecent(String dateStr, int maxDays) {
-        java.time.LocalDateTime activityDate = parseDate(dateStr);
-        if (activityDate.equals(java.time.LocalDateTime.MIN)) {
-            return false;
-        }
-        java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(maxDays);
-        return activityDate.isAfter(cutoffDate);
-    }
-
-    private boolean renovarToken() {
-        try {
-            TokenResponse novoToken = authService.refreshToken(refreshToken);
-            this.accessToken = novoToken.getAccessToken();
-            log.info("Token renovado com sucesso.");
-            return true;
-        } catch (Exception e) {
-            log.error("ERRO CRÍTICO na renovação do token: " + e.getMessage());
-            return false;
         }
     }
 }

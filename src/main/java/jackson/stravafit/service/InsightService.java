@@ -129,7 +129,8 @@ public class InsightService {
         String proximoTreinoData = calcularProximaDataTreino(activityDate, diasConfigurados);
         SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed, user);
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior =
-                workoutPrescriptionRepository.findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(activityDate.toLocalDate());
+                workoutPrescriptionRepository.findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(
+                        user.getId(), activityDate.toLocalDate());
         // 2. Classificamos o estímulo para saber qual cenário a sessão atual pertence
         ClassificacaoResultado resultado = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
         String tipoEstimuloReal = resultado.tipoEstimulo();
@@ -147,10 +148,10 @@ public class InsightService {
 
         // 4. Buscamos os históricos existentes no MySQL por Cenário
         List<ActivitySummaryEntity> listaTirosOriginal = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 2);
 
         List<ActivitySummaryEntity> listaCenario1Original = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 1);
 
         // 5. Injetamos a atividade atual na memória limpando duplicatas de data ou ID
         LocalDate dataHoje = activityDate.toLocalDate();
@@ -170,16 +171,15 @@ public class InsightService {
         // Garantir que o tipo retornado seja Optional
         // Garanta que NÃO haja .orElse(null) no final desta linha:
         Optional<WorkoutPrescriptionEntity> proximaPrescricao =
-                workoutPrescriptionRepository.findByScheduledDate(dataProximo);
+                workoutPrescriptionRepository.findByUserIdAndScheduledDate(user.getId(), dataProximo);
 
-        // Busca o último nível gravado no MySQL pela WeeklyPlannerService para cada cenário
         int nivelAtualCenario1 = workoutPrescriptionRepository
-                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(1)
+                .findTopByUserIdAndTargetScenarioOrderByScheduledDateDescCreatedAtDesc(user.getId(), 1)
                 .map(WorkoutPrescriptionEntity::getTargetLevel)
                 .orElse(1);
 
         int nivelAtualCenario2 = workoutPrescriptionRepository
-                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(2)
+                .findTopByUserIdAndTargetScenarioOrderByScheduledDateDescCreatedAtDesc(user.getId(), 2)
                 .map(WorkoutPrescriptionEntity::getTargetLevel)
                 .orElse(1);
 
@@ -211,9 +211,9 @@ public class InsightService {
         log.info("[INSIGHT] Data recebida: {} | Data normalizada SP: {} | LocalDate: {}",
                 dateStr, activityDate, dataTreinoHoje);
         Optional<WorkoutPrescriptionEntity> prescricaoHoje = workoutPrescriptionRepository
-                .findTopByScheduledDateOrderByCreatedAtDesc(dataTreinoHoje)
+                .findTopByUserIdAndScheduledDateOrderByCreatedAtDesc(user.getId(), dataTreinoHoje)
                 .or(() -> workoutPrescriptionRepository
-                        .findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(dataTreinoHoje));
+                        .findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(user.getId(), dataTreinoHoje));
 
         // 9. Mapeia o cenário e o nível salvando o histórico real
         int cenarioDetectado = ehTiro ? 2 : 1;
@@ -286,8 +286,10 @@ public class InsightService {
             ActivitySummaryEntity summary = activitySummaryRepository.findByActivityId(activityId)
                     .orElseGet(() -> activitySummaryRepository.findById(activityId)
                             .orElse(new ActivitySummaryEntity()));
+            UserEntity userRef = userRepository.getReferenceById(userId);
 
             summary.setActivityId(activityId);
+            summary.setUser(userRef);
             summary.setStartDate(activityDate.toLocalDateTime());
             summary.setDistanceKm(metrics.safeDistance());
             summary.setTotalTimeMinutes(metrics.duracao());
@@ -369,7 +371,7 @@ public class InsightService {
                                            String climaHeader) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
-        List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
+        List<ActivityEntity> historico = activityRepository.findTop10ByUserIdOrderByStartDateDesc(user.getId());
 
         int hrMax = user.getHrMax();
         int hrRest = user.getHrResting();

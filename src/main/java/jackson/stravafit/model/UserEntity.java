@@ -1,12 +1,15 @@
 package jackson.stravafit.model;
 
 import jakarta.persistence.*;
-import lombok.Getter;
+import lombok.*;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users")
+@Getter
+@Setter
 public class UserEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -17,6 +20,15 @@ public class UserEntity {
 
     @Column(name = "strava_athlete_id", unique = true)
     private Long stravaAthleteId;
+
+    @Column(name = "strava_access_token")
+    private String stravaAccessToken;
+
+    @Column(name = "strava_refresh_token")
+    private String stravaRefreshToken;
+
+    @Column(name = "strava_token_expires_at")
+    private Long stravaTokenExpiresAt;
 
     @Column(nullable = false)
     private String name;
@@ -38,7 +50,7 @@ public class UserEntity {
     private String email;
 
     @Column(name = "weekly_frequency", nullable = false)
-    private Integer weeklyFrequency=3;
+    private Integer weeklyFrequency = 3;
 
     @Column(name = "training_days", nullable = false)
     private String trainingDays = "TUESDAY,THURSDAY,SATURDAY";
@@ -53,117 +65,5 @@ public class UserEntity {
     private Long telegramChatId;
 
     public UserEntity() {
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getGoogleId() {
-        return googleId;
-    }
-
-    public void setGoogleId(String googleId) {
-        this.googleId = googleId;
-    }
-
-    public Long getStravaAthleteId() {
-        return stravaAthleteId;
-    }
-
-    public void setStravaAthleteId(Long stravaAthleteId) {
-        this.stravaAthleteId = stravaAthleteId;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public LocalDate getBirthDate() {
-        return birthDate;
-    }
-
-    public void setBirthDate(LocalDate birthDate) {
-        this.birthDate = birthDate;
-    }
-
-    public Gender getGender() {
-        return gender;
-    }
-
-    public void setGender(Gender gender) {
-        this.gender = gender;
-    }
-
-    public Integer getHrMax() {
-        return hrMax;
-    }
-
-    public void setHrMax(Integer hrMax) {
-        this.hrMax = hrMax;
-    }
-
-    public Integer getHrResting() {
-        return hrResting;
-    }
-
-    public void setHrResting(Integer hrResting) {
-        this.hrResting = hrResting;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public Integer getWeeklyFrequency() {
-        return weeklyFrequency;
-    }
-
-    public void setWeeklyFrequency(Integer weeklyFrequency) {
-        this.weeklyFrequency = weeklyFrequency;
-    }
-
-    public String getTrainingDays() {
-        return trainingDays;
-    }
-
-    public void setTrainingDays(String trainingDays) {
-        this.trainingDays = trainingDays;
-    }
-
-    public String getTargetObjective() {
-        return targetObjective;
-    }
-
-    public void setTargetObjective(String targetObjective) {
-        this.targetObjective = targetObjective;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Long getTelegramChatId() {
-        return telegramChatId;
-    }
-
-    public void setTelegramChatId(Long telegramChatId) {
-        this.telegramChatId = telegramChatId;
     }
 }

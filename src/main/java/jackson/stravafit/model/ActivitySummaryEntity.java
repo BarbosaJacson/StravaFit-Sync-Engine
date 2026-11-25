@@ -17,6 +17,10 @@ public class ActivitySummaryEntity {
     @Column(name = "activity_id")
     private Long activityId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
+
     @Column(name = "start_date")
     private LocalDateTime startDate;
 

@@ -338,6 +338,48 @@ public class RestClientConfig {
 
 
 ==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\config\SecurityConfig.java
+==========================================
+package jackson.stravafit.config;
+
+import jackson.stravafit.service.GoogleOAuthUserService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final GoogleOAuthUserService googleOAuthUserService;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(csrf -> csrf
+                        .ignoringRequestMatchers("/api/strava/webhook/**", "/api/**")
+                )
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/strava/webhook/**", "/api/v1/debug/health").permitAll()
+                        .anyRequest().authenticated()
+                )
+                .oauth2Login(oauth2 -> oauth2
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .oidcUserService(googleOAuthUserService)
+                        )
+                        .defaultSuccessUrl("/api/me", true)
+                );
+
+        return http.build();
+    }
+}
+
+
+==========================================
 ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\controller\DebugController.java
 ==========================================
 package jackson.stravafit.controller;
@@ -455,14 +497,21 @@ public class StravaWebhookController {
     public ResponseEntity<Void> handleStravaEvent(@RequestBody Map<String, Object> payload) {
         log.info("[WEBHOOK] Evento recebido: {}", payload);
 
-        // Verifica se o evento Ã© de uma nova atividade
         String objectType = (String) payload.get("object_type");
         String aspectType = (String) payload.get("aspect_type"); // create, update, delete
         Object objectId = payload.get("object_id");
+        Object ownerIdObj = payload.get("owner_id");
 
         if ("activity".equals(objectType) && ("create".equals(aspectType) || "update".equals(aspectType))) {
-            log.info("[WEBHOOK] Atividade detectada (ID: {}, AÃ§Ã£o: {})! Disparando sincronizaÃ§Ã£o...", objectId, aspectType);
-            syncScheduler.executarSincronizacao();
+            if (ownerIdObj instanceof Number ownerNumber) {
+                Long ownerId = ownerNumber.longValue();
+                log.info("[WEBHOOK] Atividade detectada (ID: {}, Atleta Strava ID: {}, AÃ§Ã£o: {})! Disparando sincronizaÃ§Ã£o direcionada...",
+                        objectId, ownerId, aspectType);
+                syncScheduler.executarSincronizacaoPorAtleta(ownerId);
+            } else {
+                log.warn("[WEBHOOK] Payload sem 'owner_id' vÃ¡lido (ID atividade: {}). Executando sincronizaÃ§Ã£o geral.", objectId);
+                syncScheduler.executarSincronizacao();
+            }
         }
 
         return ResponseEntity.ok().build();
@@ -505,6 +554,58 @@ public class SyncController {
                 "status", "SincronizaÃ§Ã£o iniciada",
                 "message", "O motor do StravaFit comeÃ§ou a processar os dados em segundo plano. Verifique os logs e o Telegram."
         ));
+    }
+}
+
+
+==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\controller\UserController.java
+==========================================
+package jackson.stravafit.controller;
+
+import jackson.stravafit.model.UserEntity;
+import jackson.stravafit.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api")
+@RequiredArgsConstructor
+public class UserController {
+    private final UserRepository userRepository;
+
+    @GetMapping("/me")
+    public ResponseEntity getCurrentUser(@AuthenticationPrincipal OidcUser oidcUser) {
+        if (oidcUser == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        UserEntity user = userRepository.findByGoogleId(oidcUser.getSubject())
+                .orElseThrow(() -> new IllegalStateException("UsuÃ¡rio autenticado nÃ£o encontrado no banco de dados."));
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("id", user.getId());
+        response.put("googleId", user.getGoogleId());
+        response.put("name", user.getName());
+        response.put("email", user.getEmail());
+        response.put("gender", user.getGender());
+        response.put("birthDate", user.getBirthDate());
+        response.put("hrMax", user.getHrMax());
+        response.put("hrResting", user.getHrResting());
+        response.put("weeklyFrequency", user.getWeeklyFrequency());
+        response.put("trainingDays", user.getTrainingDays());
+        response.put("targetObjective", user.getTargetObjective());
+        response.put("stravaConnected", user.getStravaAthleteId() != null);
+
+        return ResponseEntity.ok(response);
     }
 }
 
@@ -598,6 +699,9 @@ import java.util.Objects;
 public class ActivityEntity {
     @Id
     private Long id;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
     @Column(name = "name")
     private String name;
     @Column(name = "start_date")
@@ -637,7 +741,9 @@ public class ActivityEntity {
     public Long getId() {
         return id;
     }
-
+    public UserEntity getUser() {
+        return user;
+    }
     public String getName() {
         return name;
     }
@@ -681,7 +787,9 @@ public class ActivityEntity {
     public void setId(Long id) {
         this.id = id;
     }
-
+    public void setUser(UserEntity user) {
+        this.user = user;
+    }
     public void setName(String name) {
         this.name = name;
     }
@@ -775,6 +883,10 @@ public class ActivitySummaryEntity {
     @Id // O ID do Strava agora Ã© a chave primÃ¡ria oficial
     @Column(name = "activity_id")
     private Long activityId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
 
     @Column(name = "start_date")
     private LocalDateTime startDate;
@@ -1363,12 +1475,15 @@ ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jacks
 package jackson.stravafit.model;
 
 import jakarta.persistence.*;
-import lombok.Getter;
+import lombok.*;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users")
+@Getter
+@Setter
 public class UserEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -1379,6 +1494,15 @@ public class UserEntity {
 
     @Column(name = "strava_athlete_id", unique = true)
     private Long stravaAthleteId;
+
+    @Column(name = "strava_access_token")
+    private String stravaAccessToken;
+
+    @Column(name = "strava_refresh_token")
+    private String stravaRefreshToken;
+
+    @Column(name = "strava_token_expires_at")
+    private Long stravaTokenExpiresAt;
 
     @Column(nullable = false)
     private String name;
@@ -1400,7 +1524,7 @@ public class UserEntity {
     private String email;
 
     @Column(name = "weekly_frequency", nullable = false)
-    private Integer weeklyFrequency=3;
+    private Integer weeklyFrequency = 3;
 
     @Column(name = "training_days", nullable = false)
     private String trainingDays = "TUESDAY,THURSDAY,SATURDAY";
@@ -1415,118 +1539,6 @@ public class UserEntity {
     private Long telegramChatId;
 
     public UserEntity() {
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getGoogleId() {
-        return googleId;
-    }
-
-    public void setGoogleId(String googleId) {
-        this.googleId = googleId;
-    }
-
-    public Long getStravaAthleteId() {
-        return stravaAthleteId;
-    }
-
-    public void setStravaAthleteId(Long stravaAthleteId) {
-        this.stravaAthleteId = stravaAthleteId;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public LocalDate getBirthDate() {
-        return birthDate;
-    }
-
-    public void setBirthDate(LocalDate birthDate) {
-        this.birthDate = birthDate;
-    }
-
-    public Gender getGender() {
-        return gender;
-    }
-
-    public void setGender(Gender gender) {
-        this.gender = gender;
-    }
-
-    public Integer getHrMax() {
-        return hrMax;
-    }
-
-    public void setHrMax(Integer hrMax) {
-        this.hrMax = hrMax;
-    }
-
-    public Integer getHrResting() {
-        return hrResting;
-    }
-
-    public void setHrResting(Integer hrResting) {
-        this.hrResting = hrResting;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public Integer getWeeklyFrequency() {
-        return weeklyFrequency;
-    }
-
-    public void setWeeklyFrequency(Integer weeklyFrequency) {
-        this.weeklyFrequency = weeklyFrequency;
-    }
-
-    public String getTrainingDays() {
-        return trainingDays;
-    }
-
-    public void setTrainingDays(String trainingDays) {
-        this.trainingDays = trainingDays;
-    }
-
-    public String getTargetObjective() {
-        return targetObjective;
-    }
-
-    public void setTargetObjective(String targetObjective) {
-        this.targetObjective = targetObjective;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Long getTelegramChatId() {
-        return telegramChatId;
-    }
-
-    public void setTelegramChatId(Long telegramChatId) {
-        this.telegramChatId = telegramChatId;
     }
 }
 
@@ -1692,6 +1704,10 @@ public class WorkoutPrescriptionEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
+
     // ID da atividade Strava para a qual esta prescriÃ§Ã£o foi gerada (apÃ³s a anÃ¡lise desta atividade)
     @Column(name = "activity_id", nullable = true)
     private Long activityId;
@@ -1788,6 +1804,10 @@ public interface ActivityRepository extends JpaRepository<ActivityEntity, Long> 
 
     // Novo mÃ©todo para buscar os Ãºltimos 10 treinos
     List<ActivityEntity> findTop10ByOrderByStartDateDesc();
+
+    Optional<ActivityEntity> findTopByUserIdOrderByStartDateDesc(Long userId);
+
+    List<ActivityEntity> findTop10ByUserIdOrderByStartDateDesc(Long userId);
 }
 
 
@@ -1821,6 +1841,13 @@ public interface ActivitySummaryRepository extends JpaRepository<ActivitySummary
 
     // Busca os sumÃ¡rios de treino realizados em um intervalo de datas (ex: Segunda a Domingo da semana passada)
     List<ActivitySummaryEntity> findByStartDateBetweenOrderByStartDateAsc(LocalDateTime start, LocalDateTime end);
+
+    @Query(value = "SELECT * FROM activity_performance_summary WHERE user_id = :userId AND dominant_zone = :dominantZone ORDER BY start_date DESC LIMIT 10", nativeQuery = true)
+    List<ActivitySummaryEntity> findTop10ByUserIdAndDominantZoneOrderByStartDateDesc(@Param("userId") Long userId, @Param("dominantZone") int dominantZone);
+
+    List<ActivitySummaryEntity> findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(Long userId, Integer detectedScenario);
+
+    List<ActivitySummaryEntity> findByUserIdAndStartDateBetweenOrderByStartDateAsc(Long userId, LocalDateTime start, LocalDateTime end);
 
 }
 
@@ -1903,6 +1930,14 @@ public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPres
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
 
     Optional<WorkoutPrescriptionEntity> findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Integer targetScenario);
+
+    Optional<WorkoutPrescriptionEntity> findByUserIdAndScheduledDate(Long userId, LocalDate scheduledDate);
+
+    Optional<WorkoutPrescriptionEntity> findTopByUserIdAndScheduledDateOrderByCreatedAtDesc(Long userId, LocalDate scheduledDate);
+
+    Optional<WorkoutPrescriptionEntity> findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(Long userId, LocalDate scheduledDate);
+
+    Optional<WorkoutPrescriptionEntity> findTopByUserIdAndTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Long userId, Integer targetScenario);
 }
 
 
@@ -1920,6 +1955,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jackson.stravafit.model.UserEntity;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -1960,7 +1996,7 @@ public class ActivityService {
     }
 
     @Transactional
-    public void saveActivity(StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone, String insight) {
+    public void saveActivity(UserEntity user, StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone, String insight) {
         if (activity == null || activity.getId() == null) {
             log.warn("[SAVE] Tentativa de salvar atividade nula ou sem ID.");
             return;
@@ -1973,6 +2009,7 @@ public class ActivityService {
         ActivityEntity entity = activityRepository.findById(activity.getId())
                 .map(existing -> {
                     log.info("[DB] Atividade {} jÃ¡ existe. Atualizando dados...", activity.getId());
+                    existing.setUser(user);
                     existing.setName(activity.getName());
                     existing.setStartDate(activity.getStartDateLocal());
                     existing.setDistanceKm(activity.getDistance() / 1000.0);
@@ -1990,7 +2027,7 @@ public class ActivityService {
                 })
                 .orElseGet(() -> {
                     log.info("[DB] Atividade {} nÃ£o encontrada. Criando nova entidade...", activity.getId());
-                    return new ActivityEntity(
+                    ActivityEntity nova = new ActivityEntity(
                             activity.getId(),
                             activity.getName(),
                             activity.getStartDateLocal(),
@@ -2003,6 +2040,8 @@ public class ActivityService {
                             insight,
                             new ArrayList<>(minuteEntities)
                     );
+                    nova.setUser(user);
+                    return nova;
                 });
 
         try {
@@ -2192,6 +2231,64 @@ public class ActivityService {
 
 
 ==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\service\GoogleOAuthUserService.java
+==========================================
+package jackson.stravafit.service;
+
+import jackson.stravafit.model.UserEntity;
+import jackson.stravafit.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class GoogleOAuthUserService extends OidcUserService {
+
+    private final UserRepository userRepository;
+
+    @Override
+    @Transactional
+    public OidcUser loadUser(OidcUserRequest userRequest) throws OAuth2AuthenticationException {
+        OidcUser oidcUser = super.loadUser(userRequest);
+
+        String googleId = oidcUser.getSubject();
+        String email = oidcUser.getEmail();
+        String name = oidcUser.getFullName() != null ? oidcUser.getFullName() : email;
+
+        UserEntity user = userRepository.findByGoogleId(googleId)
+                .or(() -> userRepository.findByEmail(email))
+                .map(existing -> {
+                    if (existing.getGoogleId() == null) {
+                        log.info("[AUTH-GOOGLE] Vinculando google_id ao usuÃ¡rio existente: {} (ID: {})", email, existing.getId());
+                        existing.setGoogleId(googleId);
+                    }
+                    return userRepository.save(existing);
+                })
+                .orElseGet(() -> {
+                    log.info("[AUTH-GOOGLE] Criando novo atleta via Google OAuth: {}", email);
+                    UserEntity newUser = new UserEntity();
+                    newUser.setGoogleId(googleId);
+                    newUser.setEmail(email);
+                    newUser.setName(name);
+                    newUser.setHrMax(180);
+                    newUser.setHrResting(60);
+                    return userRepository.save(newUser);
+                });
+
+        log.info("[AUTH-GOOGLE] Login autenticado com sucesso para UserEntity ID: {}", user.getId());
+        return oidcUser;
+    }
+}
+
+
+==========================================
 ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\service\InsightService.java
 ==========================================
 package jackson.stravafit.service;
@@ -2325,7 +2422,8 @@ public class InsightService {
         String proximoTreinoData = calcularProximaDataTreino(activityDate, diasConfigurados);
         SessionMetrics metrics = calcularMetricasSessao(analysis, distance, averageSpeed, user);
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior =
-                workoutPrescriptionRepository.findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(activityDate.toLocalDate());
+                workoutPrescriptionRepository.findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(
+                        user.getId(), activityDate.toLocalDate());
         // 2. Classificamos o estÃ­mulo para saber qual cenÃ¡rio a sessÃ£o atual pertence
         ClassificacaoResultado resultado = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
         String tipoEstimuloReal = resultado.tipoEstimulo();
@@ -2343,10 +2441,10 @@ public class InsightService {
 
         // 4. Buscamos os histÃ³ricos existentes no MySQL por CenÃ¡rio
         List<ActivitySummaryEntity> listaTirosOriginal = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 2);
 
         List<ActivitySummaryEntity> listaCenario1Original = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 1);
 
         // 5. Injetamos a atividade atual na memÃ³ria limpando duplicatas de data ou ID
         LocalDate dataHoje = activityDate.toLocalDate();
@@ -2366,16 +2464,15 @@ public class InsightService {
         // Garantir que o tipo retornado seja Optional
         // Garanta que NÃƒO haja .orElse(null) no final desta linha:
         Optional<WorkoutPrescriptionEntity> proximaPrescricao =
-                workoutPrescriptionRepository.findByScheduledDate(dataProximo);
+                workoutPrescriptionRepository.findByUserIdAndScheduledDate(user.getId(), dataProximo);
 
-        // Busca o Ãºltimo nÃ­vel gravado no MySQL pela WeeklyPlannerService para cada cenÃ¡rio
         int nivelAtualCenario1 = workoutPrescriptionRepository
-                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(1)
+                .findTopByUserIdAndTargetScenarioOrderByScheduledDateDescCreatedAtDesc(user.getId(), 1)
                 .map(WorkoutPrescriptionEntity::getTargetLevel)
                 .orElse(1);
 
         int nivelAtualCenario2 = workoutPrescriptionRepository
-                .findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(2)
+                .findTopByUserIdAndTargetScenarioOrderByScheduledDateDescCreatedAtDesc(user.getId(), 2)
                 .map(WorkoutPrescriptionEntity::getTargetLevel)
                 .orElse(1);
 
@@ -2407,9 +2504,9 @@ public class InsightService {
         log.info("[INSIGHT] Data recebida: {} | Data normalizada SP: {} | LocalDate: {}",
                 dateStr, activityDate, dataTreinoHoje);
         Optional<WorkoutPrescriptionEntity> prescricaoHoje = workoutPrescriptionRepository
-                .findTopByScheduledDateOrderByCreatedAtDesc(dataTreinoHoje)
+                .findTopByUserIdAndScheduledDateOrderByCreatedAtDesc(user.getId(), dataTreinoHoje)
                 .or(() -> workoutPrescriptionRepository
-                        .findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(dataTreinoHoje));
+                        .findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(user.getId(), dataTreinoHoje));
 
         // 9. Mapeia o cenÃ¡rio e o nÃ­vel salvando o histÃ³rico real
         int cenarioDetectado = ehTiro ? 2 : 1;
@@ -2482,8 +2579,10 @@ public class InsightService {
             ActivitySummaryEntity summary = activitySummaryRepository.findByActivityId(activityId)
                     .orElseGet(() -> activitySummaryRepository.findById(activityId)
                             .orElse(new ActivitySummaryEntity()));
+            UserEntity userRef = userRepository.getReferenceById(userId);
 
             summary.setActivityId(activityId);
+            summary.setUser(userRef);
             summary.setStartDate(activityDate.toLocalDateTime());
             summary.setDistanceKm(metrics.safeDistance());
             summary.setTotalTimeMinutes(metrics.duracao());
@@ -2565,7 +2664,7 @@ public class InsightService {
                                            String climaHeader) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
-        List<ActivityEntity> historico = activityRepository.findTop10ByOrderByStartDateDesc();
+        List<ActivityEntity> historico = activityRepository.findTop10ByUserIdOrderByStartDateDesc(user.getId());
 
         int hrMax = user.getHrMax();
         int hrRest = user.getHrResting();
@@ -3339,13 +3438,6 @@ public class SyncScheduler {
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     @Value("${strava.auto-start:false}")
     private boolean autoStart;
-
-    @Value("${strava.access.token}")
-    private String accessToken;
-
-    @Value("${strava.refresh.token}")
-    private String refreshToken;
-
     @EventListener(ApplicationReadyEvent.class)
     public void autoExecutarNoStartup() {
         if (autoStart) {
@@ -3359,15 +3451,41 @@ public class SyncScheduler {
     @Async
     public void executarSincronizacao() {
         log.info("\n=== [MOTOR] SincronizaÃ§Ã£o sob demanda iniciada ===");
+        List<UserEntity> usuarios = userRepository.findAll().stream()
+                .filter(u -> u.getStravaAccessToken() != null && !u.getStravaAccessToken().isBlank())
+                .toList();
+
+        if (usuarios.isEmpty()) {
+            log.warn("[MOTOR] Nenhum usuÃ¡rio com token Strava configurado no banco.");
+            return;
+        }
+
+        for (UserEntity user : usuarios) {
+            sincronizarUsuario(user);
+        }
+    }
+
+    @Async
+    public void executarSincronizacaoPorAtleta(Long stravaAthleteId) {
+        log.info("\n=== [MOTOR] SincronizaÃ§Ã£o por Webhook para atleta Strava ID: {} ===", stravaAthleteId);
+        userRepository.findByStravaAthleteId(stravaAthleteId)
+                .ifPresentOrElse(
+                        this::sincronizarUsuario,
+                        () -> log.warn("[WEBHOOK] Nenhum usuÃ¡rio cadastrado com stravaAthleteId: {}", stravaAthleteId)
+                );
+    }
+
+    private void sincronizarUsuario(UserEntity user) {
         try {
-            ActivityService.ActivityPageResponse response = activityService.getActivitiesWithHeartRate(this.accessToken, 1);
+            ActivityService.ActivityPageResponse response =
+                    activityService.getActivitiesWithHeartRate(user.getStravaAccessToken(), 1);
+
             if (response.activities().isEmpty()) {
-                log.warn("   [STRAVA] Nenhuma atividade compatÃ­vel encontrada recentemente.");
-                enviarLembreteUltimoInsight();
+                log.warn("   [STRAVA] Nenhuma atividade compatÃ­vel encontrada para {}.", user.getName());
+                enviarLembreteUltimoInsight(user);
                 return;
             }
 
-            // 1. Garante ordenaÃ§Ã£o decrescente rigorosa por data antes de qualquer filtro
             List<StravaActivity> atividadesOrdenadas = response.activities().stream()
                     .sorted(Comparator.comparing(
                             act -> parseDate(act.getStartDateLocal()),
@@ -3375,71 +3493,63 @@ public class SyncScheduler {
                     ))
                     .toList();
 
-// 2. Busca a PRIMEIRA (mais recente) atividade elegÃ­vel
             Optional<StravaActivity> treinoPendente = atividadesOrdenadas.stream()
                     .filter(activity -> {
                         Optional<ActivityEntity> entityOpt = activityRepository.findById(activity.getId());
-
-                        // Se nÃ£o existe no banco MySQL -> Ã‰ um treino novo!
                         if (entityOpt.isEmpty()) {
                             return true;
                         }
-
-                        // Se existe no banco, reprocessa APENAS se for recente (Ãºltimos 7 dias) e estiver SEM insight vÃ¡lido
                         ActivityEntity entity = entityOpt.get();
                         boolean recente = isActivityRecent(activity.getStartDateLocal(), 7);
                         return recente && !isValidInsight(entity.getGeminiInsight());
                     })
                     .findFirst();
+
             if (treinoPendente.isPresent()) {
                 StravaActivity activity = treinoPendente.get();
-                log.info("-> NOVO TREINO DETECTADO PARA ANÃLISE: {} (ID: {})", activity.getName(), activity.getId());
-                processarEEnviar(this.accessToken, activity);
+                log.info("-> NOVO TREINO DETECTADO PARA {}: {} (ID: {})", user.getName(), activity.getName(), activity.getId());
+                processarEEnviar(user, activity);
             } else {
-                log.info("-> Todos os treinos recentes do Strava jÃ¡ estÃ£o processados no MySQL. Acionando fallback...");
-                enviarLembreteUltimoInsight();
+                log.info("-> Todos os treinos recentes de {} jÃ¡ estÃ£o processados no MySQL. Acionando fallback...", user.getName());
+                enviarLembreteUltimoInsight(user);
             }
 
         } catch (HttpClientErrorException.Unauthorized e) {
-            if (renovarToken()) {
-                executarSincronizacao();
+            if (renovarToken(user)) {
+                sincronizarUsuario(user);
             } else {
-                log.error("ERRO CRÃTICO: Falha na renovaÃ§Ã£o do token. SincronizaÃ§Ã£o abortada.");
+                log.error("ERRO CRÃTICO: Falha na renovaÃ§Ã£o do token para {}. SincronizaÃ§Ã£o abortada.", user.getName());
             }
         } catch (Exception e) {
-            log.error("ERRO NA SINCRONIZAÃ‡ÃƒO: {}", e.getMessage());
+            log.error("ERRO NA SINCRONIZAÃ‡ÃƒO de {}: {}", user.getName(), e.getMessage());
         }
     }
 
-    private void processarEEnviar(String token, StravaActivity activity) {
+    private void processarEEnviar(UserEntity user, StravaActivity activity) {
         try {
-            // ðŸŽ¯ Busca as mÃ©tricas do atleta no MySQL (ID 1)
-            UserEntity user = userRepository.findById(1L)
-                    .orElseThrow(() -> new IllegalStateException("Atleta principal nÃ£o cadastrado no MySQL."));
-
             int hrMax = user.getHrMax();
             int hrResting = user.getHrResting();
 
-            List<StravaActivity.ActivityStream> streams = activityService.getActivityStreams(token, activity.getId());
+            List<StravaActivity.ActivityStream> streams =
+                    activityService.getActivityStreams(user.getStravaAccessToken(), activity.getId());
 
-            // ðŸŽ¯ Repassa hrMax e hrResting para a agregaÃ§Ã£o por minuto
-            List<StravaActivity.MinuteAnalysis> minuteAnalysis = activityService.aggregateStreamsByMinute(streams, null, hrMax, hrResting);
+            List<StravaActivity.MinuteAnalysis> minuteAnalysis =
+                    activityService.aggregateStreamsByMinute(streams, null, hrMax, hrResting);
 
             String insight = insightService.getActivityInsight(activity, minuteAnalysis);
 
-            // ðŸŽ¯ Repassa hrMax e hrResting para o resumo da zona dominante
-            String zonaDominante = activityService.calculateDominantZoneSummary(activityService.getHeartRateStream(streams), hrMax, hrResting);
+            String zonaDominante = activityService.calculateDominantZoneSummary(
+                    activityService.getHeartRateStream(streams), hrMax, hrResting);
 
             if (isValidInsight(insight)) {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
-                activityService.saveActivity(activity, minuteAnalysis, zonaDominante, insight);
+                activityService.saveActivity(user, activity, minuteAnalysis, zonaDominante, insight);
                 log.info("   [TELEGRAM] AnÃ¡lise do novo treino enviada.");
 
-                // ðŸŽ¯ GATILHO REATIVO: Se o treino for no sÃ¡bado, dispara o planejamento da prÃ³xima semana
                 try {
                     if (activity.getStartDateLocal() != null) {
                         String dateStr = activity.getStartDateLocal().replace("Z", "");
-                        java.time.LocalDateTime startDate = java.time.LocalDateTime.parse(
+                        LocalDateTime startDate = LocalDateTime.parse(
                                 dateStr, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
                         if (startDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY) {
@@ -3453,25 +3563,49 @@ public class SyncScheduler {
 
             } else {
                 log.warn("   [GEMINI] Falha temporÃ¡ria. Atividade salva sem insight.");
-                activityService.saveActivity(activity, minuteAnalysis, zonaDominante, null);
+                activityService.saveActivity(user, activity, minuteAnalysis, zonaDominante, null);
             }
         } catch (Exception e) {
             log.error("Erro ao processar e enviar atividade {}: {}", activity.getId(), e.getMessage(), e);
         }
     }
 
-    private void enviarLembreteUltimoInsight() {
-        activityRepository.findTopByOrderByStartDateDesc().ifPresentOrElse(activity -> {
+    private void enviarLembreteUltimoInsight(UserEntity user) {
+        activityRepository.findTopByUserIdOrderByStartDateDesc(user.getId()).ifPresentOrElse(activity -> {
             if (isValidInsight(activity.getGeminiInsight())) {
                 String lembrete = "RELEMBRANDO ÃšLTIMO TREINO: " + activity.getName() + "\n\n" + activity.getGeminiInsight();
                 telegramClient.sendMessage(lembrete);
-                log.info("   [TELEGRAM] Fallback executado: Ãšltimo insight reenviado para o Telegram.");
+                log.info("   [TELEGRAM] Fallback executado para {}: Ãšltimo insight reenviado.", user.getName());
             } else {
-                log.info("   [FALLBACK] A Ãºltima atividade no banco nÃ£o possui um insight vÃ¡lido para reenvio.");
+                log.info("   [FALLBACK] A Ãºltima atividade de {} nÃ£o possui um insight vÃ¡lido para reenvio.", user.getName());
             }
-        }, () -> log.warn("   [FALLBACK] Nenhum treino encontrado no banco de dados para reenvio."));
+        }, () -> log.warn("   [FALLBACK] Nenhum treino encontrado no banco para {}.", user.getName()));
+    }
+    private boolean isActivityRecent(String dateStr, int maxDays) {
+        java.time.LocalDateTime activityDate = parseDate(dateStr);
+        if (activityDate.equals(java.time.LocalDateTime.MIN)) {
+            return false;
+        }
+        java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(maxDays);
+        return activityDate.isAfter(cutoffDate);
     }
 
+    private boolean renovarToken(UserEntity user) {
+        try {
+            TokenResponse novoToken = authService.refreshToken(user.getStravaRefreshToken());
+            user.setStravaAccessToken(novoToken.getAccessToken());
+            if (novoToken.getRefreshToken() != null) {
+                user.setStravaRefreshToken(novoToken.getRefreshToken());
+            }
+            user.setStravaTokenExpiresAt(novoToken.getExpiresAt());
+            userRepository.save(user);
+            log.info("Token Strava renovado e salvo no MySQL para {}.", user.getName());
+            return true;
+        } catch (Exception e) {
+            log.error("ERRO CRÃTICO na renovaÃ§Ã£o do token de {}: {}", user.getName(), e.getMessage());
+            return false;
+        }
+    }
     private boolean isValidInsight(String insight) {
         return insight != null && !insight.isEmpty() && !insight.startsWith("Erro");
     }
@@ -3483,12 +3617,11 @@ public class SyncScheduler {
         try {
             String normalized = dateStr.replace("Z", "");
 
-            // CORREÃ‡ÃƒO AQUI: Verifica se hÃ¡ fuso horÃ¡rio (-03:00) procurando o hÃ­fen apÃ³s a data (posiÃ§Ã£o > 10)
             boolean hasOffset = normalized.contains("+") ||
                     (normalized.lastIndexOf("-") > 10);
 
             if (hasOffset) {
-                return java.time.OffsetDateTime.parse(dateStr)
+                return OffsetDateTime.parse(dateStr)
                         .atZoneSameInstant(ZONE_SP)
                         .toLocalDateTime();
             }
@@ -3496,27 +3629,6 @@ public class SyncScheduler {
         } catch (Exception e) {
             log.warn("[SYNC-PARSER] Falha ao converter data '{}': {}", dateStr, e.getMessage());
             return LocalDateTime.MIN;
-        }
-    }
-
-    private boolean isActivityRecent(String dateStr, int maxDays) {
-        java.time.LocalDateTime activityDate = parseDate(dateStr);
-        if (activityDate.equals(java.time.LocalDateTime.MIN)) {
-            return false;
-        }
-        java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(maxDays);
-        return activityDate.isAfter(cutoffDate);
-    }
-
-    private boolean renovarToken() {
-        try {
-            TokenResponse novoToken = authService.refreshToken(refreshToken);
-            this.accessToken = novoToken.getAccessToken();
-            log.info("Token renovado com sucesso.");
-            return true;
-        } catch (Exception e) {
-            log.error("ERRO CRÃTICO na renovaÃ§Ã£o do token: " + e.getMessage());
-            return false;
         }
     }
 }
@@ -3566,31 +3678,42 @@ public class WeeklyPlannerService {
     @Scheduled(cron = "0 0 16 * * MON", zone = "America/Sao_Paulo")
     @Transactional
     public void gerenciarPlanejamentoSemanal() {
-        log.info("[WEEKLY PLANNER] Iniciando geraÃ§Ã£o do plano de treino para a semana...");
-        try {
-            UserEntity user = userRepository.findById(1L)
-                    .orElseThrow(() -> new IllegalStateException("Atleta principal nÃ£o cadastrado."));
+        log.info("[WEEKLY PLANNER] Iniciando geraÃ§Ã£o do plano de treino semanal para os atletas...");
+        List<UserEntity> usuarios = userRepository.findAll();
 
-            List<ActivitySummaryEntity> treinosAnteriores = buscarTreinosSemanaAnterior();
+        if (usuarios.isEmpty()) {
+            log.warn("[WEEKLY PLANNER] Nenhum usuÃ¡rio cadastrado no MySQL.");
+            return;
+        }
+
+        for (UserEntity user : usuarios) {
+            gerenciarPlanejamentoSemanalParaUsuario(user);
+        }
+    }
+    @Transactional
+    public void gerenciarPlanejamentoSemanalParaUsuario(UserEntity user) {
+        log.info("[WEEKLY PLANNER] Gerando planejamento semanal para o atleta: {} (ID: {})", user.getName(), user.getId());
+        try {
+            List<ActivitySummaryEntity> treinosAnteriores = buscarTreinosSemanaAnterior(user.getId());
 
             String respostaIA = gerarPrescricaoSemanalIA(user, treinosAnteriores);
 
             processarESalvarPrescricoes(respostaIA, user);
-            log.info("[WEEKLY PLANNER] Planejamento semanal concluÃ­do com sucesso.");
+            log.info("[WEEKLY PLANNER] Planejamento semanal concluÃ­do para {}.", user.getName());
         } catch (Exception e) {
-            log.error("[WEEKLY PLANNER] Erro crÃ­tico ao gerar planejamento semanal: {}", e.getMessage(), e);
+            log.error("[WEEKLY PLANNER] Erro crÃ­tico ao gerar planejamento semanal para {}: {}", user.getName(), e.getMessage(), e);
         }
     }
 
-    public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior() {
+    public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior(Long userId) {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
         LocalDateTime inicioSemana = hoje.with(DayOfWeek.MONDAY).atStartOfDay();
         LocalDateTime fimSemana = hoje.atTime(23, 59, 59);
 
-        log.info("[WEEKLY PLANNER] Buscando treinos da semana entre {} e {}", inicioSemana, fimSemana);
+        log.info("[WEEKLY PLANNER] Buscando treinos da semana entre {} e {} para userId={}", inicioSemana, fimSemana, userId);
 
-        return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
+        return activitySummaryRepository.findByUserIdAndStartDateBetweenOrderByStartDateAsc(userId, inicioSemana, fimSemana);
     }
 
     private int determinarNivelPorEI(double mediaEI) {
@@ -3611,9 +3734,9 @@ public class WeeklyPlannerService {
         boolean ehSemanaDaProva = sabado.equals(LocalDate.of(2026, 10, 31));
 
         List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 2);
         List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 1);
 
         List<ActivitySummaryEntity> ultimasTercas = listaCenario1.stream()
                 .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
@@ -3846,11 +3969,11 @@ public class WeeklyPlannerService {
             LocalDate scheduledDate = LocalDate.parse(scheduledDateStr.replaceAll("[^0-9-]", ""));
 
             WorkoutPrescriptionEntity prescription = workoutPrescriptionRepository
-                    .findByScheduledDate(scheduledDate)
+                    .findByUserIdAndScheduledDate(user.getId(), scheduledDate)
                     .orElse(new WorkoutPrescriptionEntity());
 
+            prescription.setUser(user);
             prescription.setScheduledDate(scheduledDate);
-            prescription.setActivityId(0L);
             prescription.setType(sanitizeText(extractTagValue(block, "type")));
             prescription.setDuration(sanitizeText(extractTagValue(block, "duration")));
             prescription.setIntensity(sanitizeText(extractTagValue(block, "intensity")));

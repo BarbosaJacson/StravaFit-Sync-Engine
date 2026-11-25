@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jackson.stravafit.model.UserEntity;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -49,7 +50,7 @@ public class ActivityService {
     }
 
     @Transactional
-    public void saveActivity(StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone, String insight) {
+    public void saveActivity(UserEntity user, StravaActivity activity, List<StravaActivity.MinuteAnalysis> minutes, String zone, String insight) {
         if (activity == null || activity.getId() == null) {
             log.warn("[SAVE] Tentativa de salvar atividade nula ou sem ID.");
             return;
@@ -62,6 +63,7 @@ public class ActivityService {
         ActivityEntity entity = activityRepository.findById(activity.getId())
                 .map(existing -> {
                     log.info("[DB] Atividade {} já existe. Atualizando dados...", activity.getId());
+                    existing.setUser(user);
                     existing.setName(activity.getName());
                     existing.setStartDate(activity.getStartDateLocal());
                     existing.setDistanceKm(activity.getDistance() / 1000.0);
@@ -79,7 +81,7 @@ public class ActivityService {
                 })
                 .orElseGet(() -> {
                     log.info("[DB] Atividade {} não encontrada. Criando nova entidade...", activity.getId());
-                    return new ActivityEntity(
+                    ActivityEntity nova = new ActivityEntity(
                             activity.getId(),
                             activity.getName(),
                             activity.getStartDateLocal(),
@@ -92,6 +94,8 @@ public class ActivityService {
                             insight,
                             new ArrayList<>(minuteEntities)
                     );
+                    nova.setUser(user);
+                    return nova;
                 });
 
         try {

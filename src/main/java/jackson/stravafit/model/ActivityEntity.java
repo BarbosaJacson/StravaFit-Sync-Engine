@@ -10,6 +10,9 @@ import java.util.Objects;
 public class ActivityEntity {
     @Id
     private Long id;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
     @Column(name = "name")
     private String name;
     @Column(name = "start_date")
@@ -49,7 +52,9 @@ public class ActivityEntity {
     public Long getId() {
         return id;
     }
-
+    public UserEntity getUser() {
+        return user;
+    }
     public String getName() {
         return name;
     }
@@ -93,7 +98,9 @@ public class ActivityEntity {
     public void setId(Long id) {
         this.id = id;
     }
-
+    public void setUser(UserEntity user) {
+        this.user = user;
+    }
     public void setName(String name) {
         this.name = name;
     }

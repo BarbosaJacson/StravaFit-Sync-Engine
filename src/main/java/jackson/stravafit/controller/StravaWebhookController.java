@@ -47,14 +47,21 @@ public class StravaWebhookController {
     public ResponseEntity<Void> handleStravaEvent(@RequestBody Map<String, Object> payload) {
         log.info("[WEBHOOK] Evento recebido: {}", payload);
 
-        // Verifica se o evento é de uma nova atividade
         String objectType = (String) payload.get("object_type");
         String aspectType = (String) payload.get("aspect_type"); // create, update, delete
         Object objectId = payload.get("object_id");
+        Object ownerIdObj = payload.get("owner_id");
 
         if ("activity".equals(objectType) && ("create".equals(aspectType) || "update".equals(aspectType))) {
-            log.info("[WEBHOOK] Atividade detectada (ID: {}, Ação: {})! Disparando sincronização...", objectId, aspectType);
-            syncScheduler.executarSincronizacao();
+            if (ownerIdObj instanceof Number ownerNumber) {
+                Long ownerId = ownerNumber.longValue();
+                log.info("[WEBHOOK] Atividade detectada (ID: {}, Atleta Strava ID: {}, Ação: {})! Disparando sincronização direcionada...",
+                        objectId, ownerId, aspectType);
+                syncScheduler.executarSincronizacaoPorAtleta(ownerId);
+            } else {
+                log.warn("[WEBHOOK] Payload sem 'owner_id' válido (ID atividade: {}). Executando sincronização geral.", objectId);
+                syncScheduler.executarSincronizacao();
+            }
         }
 
         return ResponseEntity.ok().build();

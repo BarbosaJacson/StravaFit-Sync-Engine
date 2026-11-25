@@ -39,31 +39,42 @@ public class WeeklyPlannerService {
     @Scheduled(cron = "0 0 16 * * MON", zone = "America/Sao_Paulo")
     @Transactional
     public void gerenciarPlanejamentoSemanal() {
-        log.info("[WEEKLY PLANNER] Iniciando geração do plano de treino para a semana...");
-        try {
-            UserEntity user = userRepository.findById(1L)
-                    .orElseThrow(() -> new IllegalStateException("Atleta principal não cadastrado."));
+        log.info("[WEEKLY PLANNER] Iniciando geração do plano de treino semanal para os atletas...");
+        List<UserEntity> usuarios = userRepository.findAll();
 
-            List<ActivitySummaryEntity> treinosAnteriores = buscarTreinosSemanaAnterior();
+        if (usuarios.isEmpty()) {
+            log.warn("[WEEKLY PLANNER] Nenhum usuário cadastrado no MySQL.");
+            return;
+        }
+
+        for (UserEntity user : usuarios) {
+            gerenciarPlanejamentoSemanalParaUsuario(user);
+        }
+    }
+    @Transactional
+    public void gerenciarPlanejamentoSemanalParaUsuario(UserEntity user) {
+        log.info("[WEEKLY PLANNER] Gerando planejamento semanal para o atleta: {} (ID: {})", user.getName(), user.getId());
+        try {
+            List<ActivitySummaryEntity> treinosAnteriores = buscarTreinosSemanaAnterior(user.getId());
 
             String respostaIA = gerarPrescricaoSemanalIA(user, treinosAnteriores);
 
             processarESalvarPrescricoes(respostaIA, user);
-            log.info("[WEEKLY PLANNER] Planejamento semanal concluído com sucesso.");
+            log.info("[WEEKLY PLANNER] Planejamento semanal concluído para {}.", user.getName());
         } catch (Exception e) {
-            log.error("[WEEKLY PLANNER] Erro crítico ao gerar planejamento semanal: {}", e.getMessage(), e);
+            log.error("[WEEKLY PLANNER] Erro crítico ao gerar planejamento semanal para {}: {}", user.getName(), e.getMessage(), e);
         }
     }
 
-    public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior() {
+    public List<ActivitySummaryEntity> buscarTreinosSemanaAnterior(Long userId) {
         LocalDate hoje = LocalDate.now(ZONE_SP);
 
         LocalDateTime inicioSemana = hoje.with(DayOfWeek.MONDAY).atStartOfDay();
         LocalDateTime fimSemana = hoje.atTime(23, 59, 59);
 
-        log.info("[WEEKLY PLANNER] Buscando treinos da semana entre {} e {}", inicioSemana, fimSemana);
+        log.info("[WEEKLY PLANNER] Buscando treinos da semana entre {} e {} para userId={}", inicioSemana, fimSemana, userId);
 
-        return activitySummaryRepository.findByStartDateBetweenOrderByStartDateAsc(inicioSemana, fimSemana);
+        return activitySummaryRepository.findByUserIdAndStartDateBetweenOrderByStartDateAsc(userId, inicioSemana, fimSemana);
     }
 
     private int determinarNivelPorEI(double mediaEI) {
@@ -84,9 +95,9 @@ public class WeeklyPlannerService {
         boolean ehSemanaDaProva = sabado.equals(LocalDate.of(2026, 10, 31));
 
         List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(2);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 2);
         List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
-                .findTop10ByDetectedScenarioOrderByStartDateDesc(1);
+                .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 1);
 
         List<ActivitySummaryEntity> ultimasTercas = listaCenario1.stream()
                 .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
@@ -319,11 +330,11 @@ public class WeeklyPlannerService {
             LocalDate scheduledDate = LocalDate.parse(scheduledDateStr.replaceAll("[^0-9-]", ""));
 
             WorkoutPrescriptionEntity prescription = workoutPrescriptionRepository
-                    .findByScheduledDate(scheduledDate)
+                    .findByUserIdAndScheduledDate(user.getId(), scheduledDate)
                     .orElse(new WorkoutPrescriptionEntity());
 
+            prescription.setUser(user);
             prescription.setScheduledDate(scheduledDate);
-            prescription.setActivityId(0L);
             prescription.setType(sanitizeText(extractTagValue(block, "type")));
             prescription.setDuration(sanitizeText(extractTagValue(block, "duration")));
             prescription.setIntensity(sanitizeText(extractTagValue(block, "intensity")));

@@ -18,4 +18,8 @@ public interface ActivityRepository extends JpaRepository<ActivityEntity, Long> 
 
     // Novo método para buscar os últimos 10 treinos
     List<ActivityEntity> findTop10ByOrderByStartDateDesc();
+
+    Optional<ActivityEntity> findTopByUserIdOrderByStartDateDesc(Long userId);
+
+    List<ActivityEntity> findTop10ByUserIdOrderByStartDateDesc(Long userId);
 }
