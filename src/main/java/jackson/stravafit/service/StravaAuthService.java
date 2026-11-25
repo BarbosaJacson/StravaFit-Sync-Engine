@@ -62,6 +62,19 @@ public class StravaAuthService {
                 .build()
                 .toUriString();
     }
+    public Long fetchAthleteId(String accessToken) {
+        Map<?, ?> athlete = restClient.get()
+                .uri("/api/v3/athlete")
+                .headers(headers -> headers.setBearerAuth(accessToken))
+                .accept(MediaType.APPLICATION_JSON)
+                .retrieve()
+                .body(Map.class);
+
+        if (athlete != null && athlete.get("id") instanceof Number num) {
+            return num.longValue();
+        }
+        return null;
+    }
 
 
 }
