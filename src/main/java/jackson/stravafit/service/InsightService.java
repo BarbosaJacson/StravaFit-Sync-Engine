@@ -286,10 +286,15 @@ public class InsightService {
             ActivitySummaryEntity summary = activitySummaryRepository.findByActivityId(activityId)
                     .orElseGet(() -> activitySummaryRepository.findById(activityId)
                             .orElse(new ActivitySummaryEntity()));
-            UserEntity userRef = userRepository.getReferenceById(userId);
+
+            UserEntity owner = (userId != null)
+                    ? userRepository.findById(userId).orElse(null)
+                    : null;
 
             summary.setActivityId(activityId);
-            summary.setUser(userRef);
+            if (owner != null) {
+                summary.setUser(owner);
+            }
             summary.setStartDate(activityDate.toLocalDateTime());
             summary.setDistanceKm(metrics.safeDistance());
             summary.setTotalTimeMinutes(metrics.duracao());

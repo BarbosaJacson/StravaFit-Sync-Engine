@@ -11,6 +11,10 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 public class UserEntity {
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private UserEntity user;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -21,10 +25,10 @@ public class UserEntity {
     @Column(name = "strava_athlete_id", unique = true)
     private Long stravaAthleteId;
 
-    @Column(name = "strava_access_token")
+    @Column(name = "strava_access_token", columnDefinition = "TEXT")
     private String stravaAccessToken;
 
-    @Column(name = "strava_refresh_token")
+    @Column(name = "strava_refresh_token", columnDefinition = "TEXT")
     private String stravaRefreshToken;
 
     @Column(name = "strava_token_expires_at")

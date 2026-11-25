@@ -108,11 +108,8 @@ public class SyncScheduler {
 
             if (treinoPendente.isPresent()) {
                 StravaActivity activity = treinoPendente.get();
-                log.info("-> NOVO TREINO DETECTADO PARA {}: {} (ID: {})", user.getName(), activity.getName(), activity.getId());
+                log.info("-> NOVO TREINO DETECTADO PARA ANÁLISE: {} (ID: {}) | Atleta: {}", activity.getName(), activity.getId(), user.getName());
                 processarEEnviar(user, activity);
-            } else {
-                log.info("-> Todos os treinos recentes de {} já estão processados no MySQL. Acionando fallback...", user.getName());
-                enviarLembreteUltimoInsight(user);
             }
 
         } catch (HttpClientErrorException.Unauthorized e) {
@@ -154,8 +151,8 @@ public class SyncScheduler {
                                 dateStr, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
                         if (startDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY) {
-                            log.info("   [WEEKLY PLANNER] Treino de sábado detectado! Disparando planejamento para a próxima semana...");
-                            weeklyPlannerService.gerenciarPlanejamentoSemanal();
+                            log.info("   [WEEKLY PLANNER] Treino de sábado detectado para {}! Disparando planejamento da próxima semana...", user.getName());
+                            weeklyPlannerService.gerenciarPlanejamentoSemanalParaUsuario(user);
                         }
                     }
                 } catch (Exception e) {
@@ -195,7 +192,7 @@ public class SyncScheduler {
         try {
             TokenResponse novoToken = authService.refreshToken(user.getStravaRefreshToken());
             user.setStravaAccessToken(novoToken.getAccessToken());
-            if (novoToken.getRefreshToken() != null) {
+            if (novoToken.getRefreshToken() != null && !novoToken.getRefreshToken().isBlank()) {
                 user.setStravaRefreshToken(novoToken.getRefreshToken());
             }
             user.setStravaTokenExpiresAt(novoToken.getExpiresAt());

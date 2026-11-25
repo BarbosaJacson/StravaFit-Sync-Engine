@@ -63,7 +63,9 @@ public class ActivityService {
         ActivityEntity entity = activityRepository.findById(activity.getId())
                 .map(existing -> {
                     log.info("[DB] Atividade {} já existe. Atualizando dados...", activity.getId());
-                    existing.setUser(user);
+                    if (existing.getUser() == null && user != null) {
+                        existing.setUser(user);
+                    }
                     existing.setName(activity.getName());
                     existing.setStartDate(activity.getStartDateLocal());
                     existing.setDistanceKm(activity.getDistance() / 1000.0);
