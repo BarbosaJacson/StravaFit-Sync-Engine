@@ -128,19 +128,22 @@ public class SyncScheduler {
 
     private void processarEEnviar(UserEntity user, StravaActivity activity) {
         try {
-            int hrMax = user.getHrMax();
-            int hrResting = user.getHrResting();
+            Integer hrMax = user.getHrMax();
+            Integer hrResting = user.getHrResting();
+            String hrZoneSource = user.getHrZoneSource();
+            Integer lv1 = user.getZ2MaxBpm();
+            Integer lv2 = user.getZ4MaxBpm();
 
             List<StravaActivity.ActivityStream> streams =
                     activityService.getActivityStreams(user.getStravaAccessToken(), activity.getId());
 
             List<StravaActivity.MinuteAnalysis> minuteAnalysis =
-                    activityService.aggregateStreamsByMinute(streams, null, hrMax, hrResting);
+                    activityService.aggregateStreamsByMinute(streams, null, hrZoneSource, lv1, lv2, hrMax, hrResting);
 
             String insight = insightService.getActivityInsight(activity, minuteAnalysis);
 
             String zonaDominante = activityService.calculateDominantZoneSummary(
-                    activityService.getHeartRateStream(streams), hrMax, hrResting);
+                    activityService.getHeartRateStream(streams), hrZoneSource, lv1, lv2, hrMax, hrResting);
 
             if (isValidInsight(insight)) {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);

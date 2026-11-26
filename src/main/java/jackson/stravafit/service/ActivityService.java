@@ -114,8 +114,11 @@ public class ActivityService {
     public List<StravaActivity.MinuteAnalysis> aggregateStreamsByMinute(
             List<StravaActivity.ActivityStream> streams,
             List<StravaActivity.HeartRateZone> zones,
-            int hrMax,
-            int hrResting) {
+            String hrZoneSource,
+            Integer lv1,
+            Integer lv2,
+            Integer hrMax,
+            Integer hrResting) {
 
         List<StravaActivity.MinuteAnalysis> analysis = new ArrayList<>();
 
@@ -135,12 +138,11 @@ public class ActivityService {
             double avgAlt = getAverage(altData, i, end);
             double avgCad = getAverage(cadData, i, end);
 
-            // 🎯 CÁLCULO DENTRO DO LOOP PARA CADA MINUTO ESPECÍFICO:
             double normalizedSpeedMpm = calculateMinuteNormalizedSpeed(distData, altData, i, end);
             double normalizedPaceMinKm = normalizedSpeedMpm > 0 ? (1000.0 / normalizedSpeedMpm) : 0.0;
 
             int minuteNumber = (i / 60) + 1;
-            int zoneDetected = calculateKarvonenZone(avgHr, hrMax, hrResting);
+            int zoneDetected = resolveZoneForBpm(avgHr, hrZoneSource, lv1, lv2, hrMax, hrResting);
 
             analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad,
                     normalizedSpeedMpm, normalizedPaceMinKm));
@@ -151,12 +153,18 @@ public class ActivityService {
     /**
      * Calcula a zona de Karvonen mais frequente durante o treino usando as métricas do MySQL.
      */
-    public String calculateDominantZoneSummary(List<Double> hrData, int hrMax, int hrResting) {
+    public String calculateDominantZoneSummary(
+            List<Double> hrData,
+            String hrZoneSource,
+            Integer lv1,
+            Integer lv2,
+            Integer hrMax,
+            Integer hrResting) {
         if (hrData.isEmpty()) return "N/A";
 
         Map<Integer, Integer> zoneCounts = new HashMap<>();
         for (Double bpm : hrData) {
-            int zone = calculateKarvonenZone(bpm, hrMax, hrResting);
+            int zone = resolveZoneForBpm(bpm, hrZoneSource, lv1, lv2, hrMax, hrResting);
             if (zone > 0) {
                 zoneCounts.put(zone, zoneCounts.getOrDefault(zone, 0) + 1);
             }
@@ -178,7 +186,6 @@ public class ActivityService {
 
         return String.format("Z%d (%.1f%%)", dominantZone, percentage);
     }
-
     public List<Double> getHeartRateStream(List<StravaActivity.ActivityStream> streams) {
         return extractStream(streams, "heartrate");
     }
@@ -219,6 +226,72 @@ public class ActivityService {
         if (bpmInt <= z4Max) return 4; // 🎯 Zona 4 Mapeada!
 
         return 5;
+    }
+    public record HeartRateRange(int minBpm, int maxBpm) {}
+
+    public Map<Integer, HeartRateRange> calculateZonesFromThresholds(int lv1, int lv2, int hrMax) {
+        int z1Max = (int) Math.round(lv1 * 0.90);
+        int z1Min = Math.max(40, (int) Math.round(lv1 * 0.70));
+
+        int z2Min = z1Max + 1;
+        int z2Max = lv1;
+
+        int meioLv1Lv2 = lv1 + (int) Math.round((lv2 - lv1) * 0.5);
+        int z3Min = z2Max + 1;
+        int z3Max = Math.max(z3Min, meioLv1Lv2);
+
+        int z4Min = Math.max(z3Max + 1, lv2 - 4);
+        int z4Max = Math.max(z4Min, lv2);
+
+        int z5Min = Math.max(z4Max + 1, lv2 + 1);
+        int z5Max = Math.max(z5Min, hrMax);
+
+        Map<Integer, HeartRateRange> zones = new HashMap<>();
+        zones.put(1, new HeartRateRange(z1Min, z1Max));
+        zones.put(2, new HeartRateRange(z2Min, z2Max));
+        zones.put(3, new HeartRateRange(z3Min, z3Max));
+        zones.put(4, new HeartRateRange(z4Min, z4Max));
+        zones.put(5, new HeartRateRange(z5Min, z5Max));
+        return zones;
+    }
+    public int calculateThresholdZone(double bpm, int lv1, int lv2, int hrMax) {
+        Map<Integer, HeartRateRange> zones = calculateZonesFromThresholds(lv1, lv2, hrMax);
+        int bpmInt = (int) Math.round(bpm);
+
+        for (int z = 1; z <= 5; z++) {
+            HeartRateRange range = zones.get(z);
+            if (range != null && bpmInt >= range.minBpm() && bpmInt <= range.maxBpm()) {
+                return z;
+            }
+        }
+
+        int melhorZona = 2;
+        int menorDistancia = Integer.MAX_VALUE;
+
+        for (int z = 1; z <= 5; z++) {
+            HeartRateRange range = zones.get(z);
+            if (range != null) {
+                int centro = (range.minBpm() + range.maxBpm()) / 2;
+                int distancia = Math.abs(bpmInt - centro);
+                if (distancia < menorDistancia) {
+                    menorDistancia = distancia;
+                    melhorZona = z;
+                }
+            }
+        }
+
+        return melhorZona;
+    }
+
+    public int resolveZoneForBpm(double bpm, String hrZoneSource, Integer lv1, Integer lv2, Integer hrMax, Integer hrResting) {
+        boolean hasThresholds = lv1 != null && lv2 != null && hrMax != null && lv1 > 0 && lv2 > lv1 && hrMax >= lv2;
+        if ("EXAM".equalsIgnoreCase(hrZoneSource) && hasThresholds) {
+            return calculateThresholdZone(bpm, lv1, lv2, hrMax);
+        }
+
+        int effectiveHrMax = (hrMax != null) ? hrMax : 0;
+        int effectiveHrResting = (hrResting != null) ? hrResting : 0;
+        return calculateKarvonenZone(bpm, effectiveHrMax, effectiveHrResting);
     }
 
     /**

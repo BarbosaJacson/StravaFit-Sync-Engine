@@ -68,6 +68,39 @@ public class UserEntity {
     @Column(name = "telegram_chat_id")
     private Long telegramChatId;
 
+    @Column(name = "hr_zone_source", length = 20)
+    private String hrZoneSource;
+
+    @Column(name = "z1_min_bpm")
+    private Integer z1MinBpm;
+
+    @Column(name = "z1_max_bpm")
+    private Integer z1MaxBpm;
+
+    @Column(name = "z2_min_bpm")
+    private Integer z2MinBpm;
+
+    @Column(name = "z2_max_bpm")
+    private Integer z2MaxBpm;
+
+    @Column(name = "z3_min_bpm")
+    private Integer z3MinBpm;
+
+    @Column(name = "z3_max_bpm")
+    private Integer z3MaxBpm;
+
+    @Column(name = "z4_min_bpm")
+    private Integer z4MinBpm;
+
+    @Column(name = "z4_max_bpm")
+    private Integer z4MaxBpm;
+
+    @Column(name = "z5_min_bpm")
+    private Integer z5MinBpm;
+
+    @Column(name = "z5_max_bpm")
+    private Integer z5MaxBpm;
+
     public UserEntity() {
     }
 }

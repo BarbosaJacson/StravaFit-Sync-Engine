@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StravaFit — Painel do Atleta</title>
+
+  <style>
+    #loading-screen {
+        position: fixed;
+        inset: 0;
+        background: #05070b;
+        color: #f3f6fb;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        z-index: 999;
+        opacity: 1;
+        transition: opacity 0.35s ease;
+    }
+    #loading-screen.hidden {
+        opacity: 0;
+        pointer-events: none;
+    }
+    #loading-screen img {
+        max-width: min(440px, 85vw);
+        max-height: 50vh;
+        border-radius: 12px;
+    }
+  </style>
+</head>
+<body>
+<h1>StravaFit</h1>
+
+<section id="perfil">
+  <h2>Meu Perfil</h2>
+  <p id="status-perfil">Carregando dados...</p>
+  <pre id="dados-perfil"></pre>
+</section>
+<section id="config-zonas">
+  <h2>Dados do Atleta e Zonas Cardíacas</h2>
+  <form id="form-perfil-zonas">
+    <div>
+      <label for="input-name">Nome:</label>
+      <input id="input-name" name="name" type="text" required />
+    </div>
+    <div>
+      <label for="input-birth-date">Data de Nascimento:</label>
+      <input id="input-birth-date" name="birthDate" type="date" />
+    </div>
+    <div>
+      <label for="input-email">E-mail:</label>
+      <input id="input-email" name="email" type="email" />
+    </div>
+
+    <div>
+      <label for="select-zone-source">Origem das Zonas Cardíacas:</label>
+      <select id="select-zone-source" name="hrZoneSource">
+        <option value="FORMULA">Fórmula de FC (Karvonen — FC Máx e Repouso)</option>
+        <option value="EXAM">Exame de Ergoespirometria (LV1, LV2 e FC Máx)</option>
+      </select>
+    </div>
+
+    <div id="campos-formula">
+      <div>
+        <label for="input-hr-max-formula">FC Máxima (bpm):</label>
+        <input id="input-hr-max-formula" name="hrMaxFormula" type="number" min="100" max="240" />
+      </div>
+      <div>
+        <label for="input-hr-resting">FC de Repouso (bpm):</label>
+        <input id="input-hr-resting" name="hrResting" type="number" min="30" max="130" />
+      </div>
+    </div>
+
+    <div id="campos-exame" style="display: none;">
+      <div>
+        <label for="input-lv1">LV1 (bpm):</label>
+        <input id="input-lv1" name="lv1" type="number" min="60" max="220" />
+      </div>
+      <div>
+        <label for="input-lv2">LV2 (bpm):</label>
+        <input id="input-lv2" name="lv2" type="number" min="80" max="230" />
+      </div>
+      <div>
+        <label for="input-hr-max-exam">FC Máxima do Exame (bpm):</label>
+        <input id="input-hr-max-exam" name="hrMaxExam" type="number" min="100" max="240" />
+      </div>
+    </div>
+
+    <button id="btn-salvar-perfil" type="submit">Salvar Dados e Zonas</button>
+    <p id="status-salvar-perfil"></p>
+  </form>
+</section>
+
+<section id="acoes">
+  <h2>Integrações e Sincronização</h2>
+  <a id="btn-conectar-strava" href="/api/strava/connect">Conectar / Reconectar Strava</a>
+  <button id="btn-sincronizar" type="button">Sincronizar Agora</button>
+  <p id="status-sync"></p>
+</section>
+
+<div id="loading-screen" class="hidden">
+  <img src="./images/z2-run.jpg" alt="Carregando StravaFit" />
+  <p id="loading-text">Carregando...</p>
+</div>
+
+<script>
+  const loadingEl = document.getElementById("loading-screen");
+  const loadingTextEl = document.getElementById("loading-text");
+  const aguardar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function mostrarCarregamento(texto) {
+      if (loadingTextEl) loadingTextEl.textContent = texto || "Carregando...";
+      if (loadingEl) loadingEl.classList.remove("hidden");
+  }
+
+  function esconderCarregamento() {
+      if (loadingEl) loadingEl.classList.add("hidden");
+  }
+  const zoneSourceSelectEl = document.getElementById("select-zone-source");
+  const camposFormulaEl = document.getElementById("campos-formula");
+  const camposExameEl = document.getElementById("campos-exame");
+
+  function atualizarCamposZona() {
+      const isExam = zoneSourceSelectEl && zoneSourceSelectEl.value === "EXAM";
+      if (camposFormulaEl) camposFormulaEl.style.display = isExam ? "none" : "block";
+      if (camposExameEl) camposExameEl.style.display = isExam ? "block" : "none";
+  }
+
+  function preencherFormularioPerfil(user) {
+      if (!user) return;
+
+      const nameEl = document.getElementById("input-name");
+      const birthDateEl = document.getElementById("input-birth-date");
+      const emailEl = document.getElementById("input-email");
+      const hrMaxFormulaEl = document.getElementById("input-hr-max-formula");
+      const hrRestingEl = document.getElementById("input-hr-resting");
+      const lv1El = document.getElementById("input-lv1");
+      const lv2El = document.getElementById("input-lv2");
+      const hrMaxExamEl = document.getElementById("input-hr-max-exam");
+
+      if (nameEl) nameEl.value = user.name ?? "";
+      if (birthDateEl) birthDateEl.value = user.birthDate ?? "";
+      if (emailEl) emailEl.value = user.email ?? "";
+
+      if (zoneSourceSelectEl) {
+          zoneSourceSelectEl.value = user.hrZoneSource === "EXAM" ? "EXAM" : "FORMULA";
+      }
+      atualizarCamposZona();
+
+      if (user.hrZoneSource === "EXAM") {
+          if (lv1El && user.z2MaxBpm != null) lv1El.value = user.z2MaxBpm;
+          if (lv2El && user.z4MaxBpm != null) lv2El.value = user.z4MaxBpm;
+          if (hrMaxExamEl && user.hrMax != null) hrMaxExamEl.value = user.hrMax;
+      } else {
+          if (hrMaxFormulaEl && user.hrMax != null) hrMaxFormulaEl.value = user.hrMax;
+          if (hrRestingEl && user.hrResting != null) hrRestingEl.value = user.hrResting;
+      }
+  }
+
+  if (zoneSourceSelectEl) {
+      zoneSourceSelectEl.addEventListener("change", atualizarCamposZona);
+  }
+  atualizarCamposZona();
+
+  const formPerfilEl = document.getElementById("form-perfil-zonas");
+  if (formPerfilEl) {
+      formPerfilEl.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const statusSalvarEl = document.getElementById("status-salvar-perfil");
+          const hrZoneSource = zoneSourceSelectEl ? zoneSourceSelectEl.value : "FORMULA";
+
+          const payload = {
+              name: document.getElementById("input-name")?.value?.trim() || null,
+              birthDate: document.getElementById("input-birth-date")?.value || null,
+              email: document.getElementById("input-email")?.value?.trim() || null,
+              hrZoneSource
+          };
+
+          if (hrZoneSource === "EXAM") {
+              payload.lv1 = Number(document.getElementById("input-lv1")?.value) || null;
+              payload.lv2 = Number(document.getElementById("input-lv2")?.value) || null;
+              payload.hrMax = Number(document.getElementById("input-hr-max-exam")?.value) || null;
+          } else {
+              payload.hrMax = Number(document.getElementById("input-hr-max-formula")?.value) || null;
+              payload.hrResting = Number(document.getElementById("input-hr-resting")?.value) || null;
+          }
+
+          if (statusSalvarEl) statusSalvarEl.textContent = "Salvando dados...";
+          mostrarCarregamento("Salvando perfil e zonas...");
+          try {
+              const resp = await fetch("/api/me", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "same-origin",
+                  body: JSON.stringify(payload)
+              });
+              if (!resp.ok) {
+                  if (statusSalvarEl) statusSalvarEl.textContent = `Falha ao salvar (status ${resp.status}).`;
+                  return;
+              }
+              if (statusSalvarEl) statusSalvarEl.textContent = "Dados salvos com sucesso!";
+              await carregarPerfil();
+          } catch (err) {
+              if (statusSalvarEl) statusSalvarEl.textContent = "Erro ao enviar dados: " + err.message;
+          } finally {
+              esconderCarregamento();
+          }
+      });
+  }
+
+  async function carregarPerfil() {
+      const statusEl = document.getElementById("status-perfil");
+      const dadosEl = document.getElementById("dados-perfil");
+      mostrarCarregamento("Carregando perfil do atleta...");
+      try {
+          const [resp] = await Promise.all([
+              fetch("/api/me", { credentials: "same-origin" }),
+              aguardar(1200)
+          ]);
+          if (!resp.ok) {
+              statusEl.textContent = "Sessão não autenticada (status " + resp.status + ").";
+              return;
+          }
+          const user = await resp.json();
+          preencherFormularioPerfil(user);
+          statusEl.textContent = `Logado como ${user.name} (${user.email}) | Strava conectado: ${user.stravaConnected ? "Sim" : "Não"}`;
+          dadosEl.textContent = JSON.stringify(user, null, 2);
+      } catch (err) {
+          statusEl.textContent = "Erro ao consultar /api/me: " + err.message;
+      } finally {
+          esconderCarregamento();
+      }
+  }
+
+  document.getElementById("btn-sincronizar").addEventListener("click", async () => {
+      const syncEl = document.getElementById("status-sync");
+      syncEl.textContent = "Disparando sincronização...";
+      mostrarCarregamento("Sincronizando treinos...");
+      try {
+          const [resp] = await Promise.all([
+              fetch("/api/sync", {
+                  method: "POST",
+                  credentials: "same-origin"
+              }),
+              aguardar(1200)
+          ]);
+          const data = await resp.json();
+          syncEl.textContent = `${data.status}: ${data.message}`;
+      } catch (err) {
+          syncEl.textContent = "Erro ao disparar sincronização: " + err.message;
+      } finally {
+          esconderCarregamento();
+      }
+  });
+
+  carregarPerfil();
+</script>
+</body>
+</html>

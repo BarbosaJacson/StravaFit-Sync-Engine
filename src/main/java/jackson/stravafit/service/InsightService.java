@@ -469,11 +469,15 @@ public class InsightService {
         sb.append("📊 ESFORÇO POR ZONA CARDÍACA:\n");
         java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
         java.util.Map<Integer, Integer> maxBpms = new java.util.HashMap<>();
-        for (int bpm = hrRest; bpm <= hrMax; bpm++) {
-            int z = activityService.calculateKarvonenZone(bpm, hrMax, hrRest);
-            if (z > 0) {
-                minBpms.putIfAbsent(z, bpm);
-                maxBpms.put(z, bpm);
+        String hrZoneSource = user.getHrZoneSource();
+        Integer lv1 = user.getZ2MaxBpm();
+        Integer lv2 = user.getZ4MaxBpm();
+
+        for (int bpm = Math.min(50, hrRest); bpm <= hrMax; bpm++) {
+            int z = activityService.resolveZoneForBpm(bpm, hrZoneSource, lv1, lv2, hrMax, hrRest);
+            if (z >= 1 && z <= 5) {
+                if (bpm < minBpms.getOrDefault(z, Integer.MAX_VALUE)) minBpms.put(z, bpm);
+                if (bpm > maxBpms.getOrDefault(z, 0)) maxBpms.put(z, bpm);
             }
         }
         Map<Integer, Double> zonePercentages = metrics.zonePercentages();
@@ -642,7 +646,22 @@ public class InsightService {
                 .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
                 .filter(Objects::nonNull)
                 .toList();
-        Map<Integer, Double> zonePercentages = activityService.calculateZonePercentages(hrData, hrMax, hrRest);
+        String hrZoneSource = user.getHrZoneSource();
+        Integer lv1 = user.getZ2MaxBpm();
+        Integer lv2 = user.getZ4MaxBpm();
+
+        Map<Integer, Long> zoneCounts = hrData.stream()
+                .map(bpm -> activityService.resolveZoneForBpm(bpm, hrZoneSource, lv1, lv2, hrMax, hrRest))
+                .filter(z -> z > 0)
+                .collect(Collectors.groupingBy(z -> z, Collectors.counting()));
+
+        long totalMinutos = hrData.size();
+        Map<Integer, Double> zonePercentages = new java.util.HashMap<>();
+        for (int z = 1; z <= 5; z++) {
+            long count = zoneCounts.getOrDefault(z, 0L);
+            double pct = totalMinutos > 0 ? (count * 100.0) / totalMinutos : 0.0;
+            zonePercentages.put(z, pct);
+        }
 
         int zonaPredominante = zonePercentages.entrySet().stream()
                 .filter(entry -> entry.getKey() > 0)

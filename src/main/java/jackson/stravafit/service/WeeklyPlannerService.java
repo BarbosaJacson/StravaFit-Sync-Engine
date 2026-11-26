@@ -51,6 +51,7 @@ public class WeeklyPlannerService {
             gerenciarPlanejamentoSemanalParaUsuario(user);
         }
     }
+
     @Transactional
     public void gerenciarPlanejamentoSemanalParaUsuario(UserEntity user) {
         log.info("[WEEKLY PLANNER] Gerando planejamento semanal para o atleta: {} (ID: {})", user.getName(), user.getId());
@@ -115,11 +116,19 @@ public class WeeklyPlannerService {
         double mediaEI_Quinta = ultimasQuintas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
         double mediaEI_Sabado = ultimosSabados.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
 
-        int nivelTerca  = determinarNivelPorEI(mediaEI_Terca);
+        int nivelTerca = determinarNivelPorEI(mediaEI_Terca);
         int nivelQuinta = determinarNivelPorEI(mediaEI_Quinta);
         int nivelSabado = determinarNivelPorEI(mediaEI_Sabado);
 
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
+        String fonteZonas = "EXAM".equalsIgnoreCase(user.getHrZoneSource())
+                ? "EXAME DE ERGOSPIROMETRIA (LV1/LV2)"
+                : "FÓRMULA DE FC (Karvonen / FC máx e repouso)";
+
+        Integer idade = null;
+        if (user.getBirthDate() != null) {
+            idade = java.time.Period.between(user.getBirthDate(), hoje).getYears();
+        }
 
         StringBuilder sb = new StringBuilder();
         sb.append("VOCÊ É O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
@@ -164,7 +173,22 @@ public class WeeklyPlannerService {
             }
             sb.append("\n");
         }
-
+        sb.append("--- PERFIL FISIOLÓGICO E ZONAS DO ATLETA ---\n");
+        sb.append("- Origem das Zonas Cardíacas: ").append(fonteZonas).append("\n");
+        if (idade != null) {
+            sb.append("- Idade: ").append(idade).append(" anos\n");
+        }
+        if (user.getHrMax() != null) {
+            sb.append("- FC Máxima: ").append(user.getHrMax()).append(" bpm\n");
+        }
+        if (user.getHrResting() != null) {
+            sb.append("- FC de Repouso: ").append(user.getHrResting()).append(" bpm\n");
+        }
+        if ("EXAM".equalsIgnoreCase(user.getHrZoneSource()) && user.getZ2MaxBpm() != null && user.getZ4MaxBpm() != null) {
+            sb.append("- Limiares de Referência (Z2 Máx / LV1 e Z4 Máx / LV2): ")
+                    .append(user.getZ2MaxBpm()).append(" bpm / ").append(user.getZ4MaxBpm()).append(" bpm\n");
+        }
+        sb.append("\n");
         sb.append("--- DIRETRIZES DE CENÁRIO E NÍVEIS OBRIGATÓRIOS DO SISTEMA ---\n");
         sb.append("1. TERÇA-FEIRA (").append(terca).append("): Prescrever CENÁRIO 1 no NÍVEL ").append(nivelTerca).append(" (Rodagem Leve / Z2 - FATMAX).\n");
         sb.append("2. QUINTA-FEIRA (").append(quinta).append("): Prescrever CENÁRIO 2 no NÍVEL ").append(nivelQuinta).append(" (Intensificação / Tiros / VO2máx).\n");

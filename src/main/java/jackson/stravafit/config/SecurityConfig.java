@@ -29,7 +29,7 @@ public class SecurityConfig {
                         .userInfoEndpoint(userInfo -> userInfo
                                 .oidcUserService(googleOAuthUserService)
                         )
-                        .defaultSuccessUrl("/api/me", true)
+                        .defaultSuccessUrl("/", true)
                 );
 
         return http.build();
