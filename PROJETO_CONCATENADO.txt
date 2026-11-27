@@ -371,7 +371,7 @@ public class SecurityConfig {
                         .userInfoEndpoint(userInfo -> userInfo
                                 .oidcUserService(googleOAuthUserService)
                         )
-                        .defaultSuccessUrl("/api/me", true)
+                        .defaultSuccessUrl("/", true)
                 );
 
         return http.build();
@@ -446,6 +446,105 @@ public class DebugController {
 
 
 ==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\controller\StravaAuthController.java
+==========================================
+package jackson.stravafit.controller;
+
+import jackson.stravafit.model.TokenResponse;
+import jackson.stravafit.model.UserEntity;
+import jackson.stravafit.repository.UserRepository;
+import jackson.stravafit.service.StravaAuthService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import jakarta.servlet.http.HttpSession;
+import java.net.URI;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/strava")
+@RequiredArgsConstructor
+public class StravaAuthController {
+
+    private final UserRepository userRepository;
+    private final StravaAuthService stravaAuthService;
+
+    @GetMapping("/connect")
+    public ResponseEntity<Void> connectStrava(@AuthenticationPrincipal OidcUser oidcUser,
+                                              HttpSession session) {
+        if (oidcUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        UserEntity user = userRepository.findByGoogleId(oidcUser.getSubject())
+                .orElseThrow(() -> new IllegalStateException("UsuÃ¡rio autenticado nÃ£o encontrado."));
+
+        String state = UUID.randomUUID().toString();
+        session.setAttribute("STRAVA_OAUTH_STATE", state);
+        session.setAttribute("STRAVA_CONNECT_USER_ID", user.getId());
+
+        String redirectUri = "http://localhost:8080/api/strava/callback";
+        String authUrl = stravaAuthService.buildAuthorizationUrl(redirectUri, state);
+
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(authUrl))
+                .build();
+    }
+    @GetMapping("/callback")
+    public ResponseEntity<String> stravaCallback(@RequestParam(required = false) String code,
+                                                 @RequestParam(required = false) String state,
+                                                 @RequestParam(required = false) String error,
+                                                 HttpSession session) {
+        if (error != null && !error.isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body("AutorizaÃ§Ã£o no Strava negada ou cancelada: " + error);
+        }
+
+        String expectedState = (String) session.getAttribute("STRAVA_OAUTH_STATE");
+        Long userId = (Long) session.getAttribute("STRAVA_CONNECT_USER_ID");
+
+        session.removeAttribute("STRAVA_OAUTH_STATE");
+        session.removeAttribute("STRAVA_CONNECT_USER_ID");
+
+        if (code == null || code.isBlank() || state == null || expectedState == null || !expectedState.equals(state)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body("ParÃ¢metros invÃ¡lidos ou sessÃ£o de autorizaÃ§Ã£o expirada.");
+        }
+
+        if (userId == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body("UsuÃ¡rio da conexÃ£o Strava nÃ£o identificado na sessÃ£o.");
+        }
+
+        UserEntity user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalStateException("UsuÃ¡rio nÃ£o encontrado no banco: " + userId));
+
+        TokenResponse tokenResponse = stravaAuthService.exchangeAuthorizationCode(code);
+
+        user.setStravaAccessToken(tokenResponse.getAccessToken());
+        if (tokenResponse.getRefreshToken() != null && !tokenResponse.getRefreshToken().isBlank()) {
+            user.setStravaRefreshToken(tokenResponse.getRefreshToken());
+        }
+        user.setStravaTokenExpiresAt(tokenResponse.getExpiresAt());
+        Long athleteId = stravaAuthService.fetchAthleteId(tokenResponse.getAccessToken());
+        if (athleteId != null) {
+            user.setStravaAthleteId(athleteId);
+        }
+
+        userRepository.save(user);
+        return ResponseEntity.ok("Conta Strava conectada com sucesso para " + user.getEmail() + "!");
+    }
+}
+
+
+==========================================
 ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\controller\StravaWebhookController.java
 ==========================================
 package jackson.stravafit.controller;
@@ -500,16 +599,15 @@ public class StravaWebhookController {
         String objectType = (String) payload.get("object_type");
         String aspectType = (String) payload.get("aspect_type"); // create, update, delete
         Object objectId = payload.get("object_id");
-        Object ownerIdObj = payload.get("owner_id");
 
         if ("activity".equals(objectType) && ("create".equals(aspectType) || "update".equals(aspectType))) {
-            if (ownerIdObj instanceof Number ownerNumber) {
-                Long ownerId = ownerNumber.longValue();
-                log.info("[WEBHOOK] Atividade detectada (ID: {}, Atleta Strava ID: {}, AÃ§Ã£o: {})! Disparando sincronizaÃ§Ã£o direcionada...",
-                        objectId, ownerId, aspectType);
+            Object ownerIdObj = payload.get("owner_id");
+            Long ownerId = (ownerIdObj instanceof Number num) ? num.longValue() : null;
+            if (ownerId != null) {
+                log.info("[WEBHOOK] Atividade detectada (ID: {}, AÃ§Ã£o: {}, Atleta/Owner: {})! Disparando sincronizaÃ§Ã£o do atleta...", objectId, aspectType, ownerId);
                 syncScheduler.executarSincronizacaoPorAtleta(ownerId);
             } else {
-                log.warn("[WEBHOOK] Payload sem 'owner_id' vÃ¡lido (ID atividade: {}). Executando sincronizaÃ§Ã£o geral.", objectId);
+                log.info("[WEBHOOK] Atividade detectada (ID: {}, AÃ§Ã£o: {}) sem owner_id! Disparando sincronizaÃ§Ã£o geral...", objectId, aspectType);
                 syncScheduler.executarSincronizacao();
             }
         }
@@ -569,10 +667,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -604,8 +701,200 @@ public class UserController {
         response.put("trainingDays", user.getTrainingDays());
         response.put("targetObjective", user.getTargetObjective());
         response.put("stravaConnected", user.getStravaAthleteId() != null);
+        response.put("hrZoneSource", user.getHrZoneSource());
+        response.put("z1MinBpm", user.getZ1MinBpm());
+        response.put("z1MaxBpm", user.getZ1MaxBpm());
+        response.put("z2MinBpm", user.getZ2MinBpm());
+        response.put("z2MaxBpm", user.getZ2MaxBpm());
+        response.put("z3MinBpm", user.getZ3MinBpm());
+        response.put("z3MaxBpm", user.getZ3MaxBpm());
+        response.put("z4MinBpm", user.getZ4MinBpm());
+        response.put("z4MaxBpm", user.getZ4MaxBpm());
+        response.put("z5MinBpm", user.getZ5MinBpm());
+        response.put("z5MaxBpm", user.getZ5MaxBpm());
 
         return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/me")
+    public ResponseEntity updateCurrentUser(
+            @AuthenticationPrincipal OidcUser oidcUser,
+            @RequestBody Map<String, Object> payload){
+        if (oidcUser == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        UserEntity user = userRepository.findByGoogleId(oidcUser.getSubject())
+                .orElseThrow(() -> new IllegalStateException("UsuÃ¡rio autenticado nÃ£o encontrado no banco de dados."));
+
+        if (payload.get("name") instanceof String name && !name.isBlank()) {
+            user.setName(name.trim());
+        }
+        if (payload.get("email") instanceof String email && !email.isBlank()) {
+            user.setEmail(email.trim());
+        }
+        if (payload.get("birthDate") instanceof String birthDateStr && !birthDateStr.isBlank()) {
+            user.setBirthDate(LocalDate.parse(birthDateStr));
+        }
+        Integer weeklyFrequency = toInteger(payload.get("weeklyFrequency"));
+        if (weeklyFrequency != null && weeklyFrequency >= 1 && weeklyFrequency <= 7) {
+            user.setWeeklyFrequency(weeklyFrequency);
+        }
+        if (payload.get("trainingDays") instanceof String trainingDaysStr && !trainingDaysStr.isBlank()) {
+            user.setTrainingDays(trainingDaysStr.trim().toUpperCase());
+        }
+
+        String source = (payload.get("hrZoneSource") instanceof String s) ? s.trim().toUpperCase() : "FORMULA";
+        user.setHrZoneSource(source);
+
+        if ("EXAM".equals(source)) {
+            user.setZ1MinBpm(toInteger(payload.get("z1MinBpm")));
+            user.setZ1MaxBpm(toInteger(payload.get("z1MaxBpm")));
+            user.setZ2MinBpm(toInteger(payload.get("z2MinBpm")));
+            user.setZ2MaxBpm(toInteger(payload.get("z2MaxBpm")));
+            user.setZ3MinBpm(toInteger(payload.get("z3MinBpm")));
+            user.setZ3MaxBpm(toInteger(payload.get("z3MaxBpm")));
+            user.setZ4MinBpm(toInteger(payload.get("z4MinBpm")));
+            user.setZ4MaxBpm(toInteger(payload.get("z4MaxBpm")));
+            user.setZ5MinBpm(toInteger(payload.get("z5MinBpm")));
+            user.setZ5MaxBpm(toInteger(payload.get("z5MaxBpm")));
+            if (user.getZ5MaxBpm() != null) {
+                user.setHrMax(user.getZ5MaxBpm());
+            }
+        } else {
+            Integer hrMax = toInteger(payload.get("hrMax"));
+            Integer hrResting = toInteger(payload.get("hrResting"));
+            if (hrMax != null) user.setHrMax(hrMax);
+            if (hrResting != null) user.setHrResting(hrResting);
+        }
+
+        userRepository.save(user);
+        return getCurrentUser(oidcUser);
+    }
+
+    private Integer toInteger(Object value) {
+        if (value instanceof Number num) {
+            return num.intValue();
+        }
+        if (value instanceof String str && !str.isBlank()) {
+            return Integer.parseInt(str.trim());
+        }
+        return null;
+    }
+}
+
+
+==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\controller\UserGoalController.java
+==========================================
+package jackson.stravafit.controller;
+
+import jackson.stravafit.model.GoalCategory;
+import jackson.stravafit.model.UserEntity;
+import jackson.stravafit.model.UserGoalEntity;
+import jackson.stravafit.repository.UserRepository;
+import jackson.stravafit.service.UserGoalService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+@RestController
+@RequestMapping("/api/goals")
+@RequiredArgsConstructor
+public class UserGoalController {
+
+    private final UserRepository userRepository;
+    private final UserGoalService userGoalService;
+
+    @GetMapping("/active")
+    public ResponseEntity getActiveGoal(@AuthenticationPrincipal OidcUser oidcUser) {
+        if (oidcUser == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        UserEntity user = userRepository.findByGoogleId(oidcUser.getSubject())
+                .orElseThrow(() -> new IllegalStateException("UsuÃ¡rio autenticado nÃ£o encontrado no banco de dados."));
+
+        Optional<UserGoalEntity> activeGoalOpt = userGoalService.getActiveGoal(user.getId());
+        GoalCategory category = activeGoalOpt
+                .map(UserGoalEntity::getCategory)
+                .orElse(GoalCategory.ROUTINE_CONSISTENCY);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("hasActiveGoal", activeGoalOpt.isPresent());
+        body.put("category", category.name());
+        body.put("categoryLabel", category.getLabel());
+        body.put("trainingStyleCode", activeGoalOpt
+                .map(UserGoalEntity::getTrainingStyleCode)
+                .orElse(category.getTrainingStyleCode()));
+        body.put("recommendedWeeklyFrequency", userGoalService.recommendWeeklyFrequency(category));
+        body.put("currentWeeklyFrequency", user.getWeeklyFrequency());
+        body.put("trainingDays", user.getTrainingDays());
+
+        if (activeGoalOpt.isPresent() && activeGoalOpt.get().getEvent() != null) {
+            body.put("eventName", activeGoalOpt.get().getEvent().getEventName());
+            body.put("eventDate", activeGoalOpt.get().getEvent().getEventDate());
+            body.put("targetDistanceKm", activeGoalOpt.get().getEvent().getTargetDistanceKm());
+        }
+
+        return ResponseEntity.ok(body);
+    }
+
+    @PostMapping
+    public ResponseEntity<?> setActiveGoal(@AuthenticationPrincipal OidcUser oidcUser,
+                                           @RequestBody Map<String, Object> payload) {
+        if (oidcUser == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        UserEntity user = userRepository.findByGoogleId(oidcUser.getSubject())
+                .orElseThrow(() -> new IllegalStateException("UsuÃ¡rio autenticado nÃ£o encontrado no banco de dados."));
+
+        Object categoryObj = payload.get("category");
+        if (!(categoryObj instanceof String categoryStr) || categoryStr.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Informe a categoria do objetivo (category)."));
+        }
+
+        GoalCategory category;
+        try {
+            category = GoalCategory.valueOf(categoryStr.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Categoria de objetivo invÃ¡lida: " + categoryStr));
+        }
+
+        String eventName = (payload.get("eventName") instanceof String s && !s.isBlank()) ? s.trim() : null;
+        LocalDate eventDate = null;
+        if (payload.get("eventDate") instanceof String dateStr && !dateStr.isBlank()) {
+            try {
+                eventDate = LocalDate.parse(dateStr.trim());
+            } catch (Exception e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Data do evento invÃ¡lida. Use o formato AAAA-MM-DD."));
+            }
+        }
+
+        try {
+            UserGoalEntity saved = userGoalService.defineActiveGoal(user.getId(), category, eventName, eventDate);
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("id", saved.getId());
+            resp.put("category", saved.getCategory().name());
+            resp.put("categoryLabel", saved.getCategory().getLabel());
+            resp.put("trainingStyleCode", saved.getTrainingStyleCode());
+            resp.put("recommendedWeeklyFrequency", userGoalService.recommendWeeklyFrequency(saved.getCategory()));
+            if (saved.getEvent() != null) {
+                resp.put("eventName", saved.getEvent().getEventName());
+                resp.put("eventDate", saved.getEvent().getEventDate());
+            }
+            return ResponseEntity.ok(resp);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 }
 
@@ -885,7 +1174,7 @@ public class ActivitySummaryEntity {
     private Long activityId;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
+    @JoinColumn(name = "user_id")
     private UserEntity user;
 
     @Column(name = "start_date")
@@ -932,6 +1221,34 @@ package jackson.stravafit.model;
 public enum Gender {
     MALE,
     FEMALE
+}
+
+
+==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\model\GoalCategory.java
+==========================================
+package jackson.stravafit.model;
+
+public enum GoalCategory {
+    ROUTINE_CONSISTENCY("Rotina e ConsistÃªncia", "ROUTINE_CONSISTENCY"),
+    HIGH_PERFORMANCE("Alta Performance (Pace e Provas)", "HIGH_PERFORMANCE"),
+    CARDIO_LONGEVITY("SaÃºde CardÃ­aca e Longevidade", "CARDIO_LONGEVITY");
+
+    private final String label;
+    private final String trainingStyleCode;
+
+    GoalCategory(String label, String trainingStyleCode) {
+        this.label = label;
+        this.trainingStyleCode = trainingStyleCode;
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    public String getTrainingStyleCode() {
+        return trainingStyleCode;
+    }
 }
 
 
@@ -1485,6 +1802,10 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 public class UserEntity {
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private UserEntity user;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -1495,10 +1816,10 @@ public class UserEntity {
     @Column(name = "strava_athlete_id", unique = true)
     private Long stravaAthleteId;
 
-    @Column(name = "strava_access_token")
+    @Column(name = "strava_access_token", columnDefinition = "TEXT")
     private String stravaAccessToken;
 
-    @Column(name = "strava_refresh_token")
+    @Column(name = "strava_refresh_token", columnDefinition = "TEXT")
     private String stravaRefreshToken;
 
     @Column(name = "strava_token_expires_at")
@@ -1537,6 +1858,39 @@ public class UserEntity {
 
     @Column(name = "telegram_chat_id")
     private Long telegramChatId;
+
+    @Column(name = "hr_zone_source", length = 20)
+    private String hrZoneSource;
+
+    @Column(name = "z1_min_bpm")
+    private Integer z1MinBpm;
+
+    @Column(name = "z1_max_bpm")
+    private Integer z1MaxBpm;
+
+    @Column(name = "z2_min_bpm")
+    private Integer z2MinBpm;
+
+    @Column(name = "z2_max_bpm")
+    private Integer z2MaxBpm;
+
+    @Column(name = "z3_min_bpm")
+    private Integer z3MinBpm;
+
+    @Column(name = "z3_max_bpm")
+    private Integer z3MaxBpm;
+
+    @Column(name = "z4_min_bpm")
+    private Integer z4MinBpm;
+
+    @Column(name = "z4_max_bpm")
+    private Integer z4MaxBpm;
+
+    @Column(name = "z5_min_bpm")
+    private Integer z5MinBpm;
+
+    @Column(name = "z5_max_bpm")
+    private Integer z5MaxBpm;
 
     public UserEntity() {
     }
@@ -1642,6 +1996,66 @@ public class UserEventEntity {
 
 
 ==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\model\UserGoalEntity.java
+==========================================
+package jackson.stravafit.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "user_goals")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class UserGoalEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "category", nullable = false, length = 40)
+    private GoalCategory category;
+
+    @Column(name = "training_style_code", nullable = false, length = 60)
+    private String trainingStyleCode;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "event_id")
+    private UserEventEntity event;
+
+    @Column(name = "active", nullable = false)
+    @Builder.Default
+    private Boolean active = true;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        if (this.createdAt == null) {
+            this.createdAt = LocalDateTime.now();
+        }
+        if (this.active == null) {
+            this.active = true;
+        }
+        if (this.trainingStyleCode == null && this.category != null) {
+            this.trainingStyleCode = this.category.getTrainingStyleCode();
+        }
+    }
+}
+
+
+==========================================
 ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\model\WeatherData.java
 ==========================================
 package jackson.stravafit.model;
@@ -1705,7 +2119,7 @@ public class WorkoutPrescriptionEntity {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
+    @JoinColumn(name = "user_id")
     private UserEntity user;
 
     // ID da atividade Strava para a qual esta prescriÃ§Ã£o foi gerada (apÃ³s a anÃ¡lise desta atividade)
@@ -1885,6 +2299,25 @@ public interface UserEventRepository extends JpaRepository<UserEventEntity, Long
 
 
 ==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\repository\UserGoalRepository.java
+==========================================
+package jackson.stravafit.repository;
+
+import jackson.stravafit.model.UserGoalEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface UserGoalRepository extends JpaRepository<UserGoalEntity, Long> {
+
+    Optional<UserGoalEntity> findFirstByUserIdAndActiveTrueOrderByCreatedAtDesc(Long userId);
+
+    List<UserGoalEntity> findByUserIdOrderByCreatedAtDesc(Long userId);
+}
+
+
+==========================================
 ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\repository\UserRepository.java
 ==========================================
 package jackson.stravafit.repository;
@@ -1921,15 +2354,8 @@ import java.util.Optional;
 @Repository
 public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPrescriptionEntity, Long> {
 
-    Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
-
-    Optional<WorkoutPrescriptionEntity> findTopByScheduledDateOrderByCreatedAtDesc(LocalDate scheduledDate);
-
-    Optional<WorkoutPrescriptionEntity> findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(LocalDate scheduledDate);
 
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
-
-    Optional<WorkoutPrescriptionEntity> findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Integer targetScenario);
 
     Optional<WorkoutPrescriptionEntity> findByUserIdAndScheduledDate(Long userId, LocalDate scheduledDate);
 
@@ -2009,7 +2435,9 @@ public class ActivityService {
         ActivityEntity entity = activityRepository.findById(activity.getId())
                 .map(existing -> {
                     log.info("[DB] Atividade {} jÃ¡ existe. Atualizando dados...", activity.getId());
-                    existing.setUser(user);
+                    if (existing.getUser() == null && user != null) {
+                        existing.setUser(user);
+                    }
                     existing.setName(activity.getName());
                     existing.setStartDate(activity.getStartDateLocal());
                     existing.setDistanceKm(activity.getDistance() / 1000.0);
@@ -2058,8 +2486,11 @@ public class ActivityService {
     public List<StravaActivity.MinuteAnalysis> aggregateStreamsByMinute(
             List<StravaActivity.ActivityStream> streams,
             List<StravaActivity.HeartRateZone> zones,
-            int hrMax,
-            int hrResting) {
+            String hrZoneSource,
+            Integer lv1,
+            Integer lv2,
+            Integer hrMax,
+            Integer hrResting) {
 
         List<StravaActivity.MinuteAnalysis> analysis = new ArrayList<>();
 
@@ -2079,12 +2510,11 @@ public class ActivityService {
             double avgAlt = getAverage(altData, i, end);
             double avgCad = getAverage(cadData, i, end);
 
-            // ðŸŽ¯ CÃLCULO DENTRO DO LOOP PARA CADA MINUTO ESPECÃFICO:
             double normalizedSpeedMpm = calculateMinuteNormalizedSpeed(distData, altData, i, end);
             double normalizedPaceMinKm = normalizedSpeedMpm > 0 ? (1000.0 / normalizedSpeedMpm) : 0.0;
 
             int minuteNumber = (i / 60) + 1;
-            int zoneDetected = calculateKarvonenZone(avgHr, hrMax, hrResting);
+            int zoneDetected = resolveZoneForBpm(avgHr, hrZoneSource, lv1, lv2, hrMax, hrResting);
 
             analysis.add(new StravaActivity.MinuteAnalysis(minuteNumber, avgHr, maxHr, zoneDetected, avgAlt, avgCad,
                     normalizedSpeedMpm, normalizedPaceMinKm));
@@ -2095,12 +2525,18 @@ public class ActivityService {
     /**
      * Calcula a zona de Karvonen mais frequente durante o treino usando as mÃ©tricas do MySQL.
      */
-    public String calculateDominantZoneSummary(List<Double> hrData, int hrMax, int hrResting) {
+    public String calculateDominantZoneSummary(
+            List<Double> hrData,
+            String hrZoneSource,
+            Integer lv1,
+            Integer lv2,
+            Integer hrMax,
+            Integer hrResting) {
         if (hrData.isEmpty()) return "N/A";
 
         Map<Integer, Integer> zoneCounts = new HashMap<>();
         for (Double bpm : hrData) {
-            int zone = calculateKarvonenZone(bpm, hrMax, hrResting);
+            int zone = resolveZoneForBpm(bpm, hrZoneSource, lv1, lv2, hrMax, hrResting);
             if (zone > 0) {
                 zoneCounts.put(zone, zoneCounts.getOrDefault(zone, 0) + 1);
             }
@@ -2122,7 +2558,6 @@ public class ActivityService {
 
         return String.format("Z%d (%.1f%%)", dominantZone, percentage);
     }
-
     public List<Double> getHeartRateStream(List<StravaActivity.ActivityStream> streams) {
         return extractStream(streams, "heartrate");
     }
@@ -2163,6 +2598,72 @@ public class ActivityService {
         if (bpmInt <= z4Max) return 4; // ðŸŽ¯ Zona 4 Mapeada!
 
         return 5;
+    }
+    public record HeartRateRange(int minBpm, int maxBpm) {}
+
+    public Map<Integer, HeartRateRange> calculateZonesFromThresholds(int lv1, int lv2, int hrMax) {
+        int z1Max = (int) Math.round(lv1 * 0.90);
+        int z1Min = Math.max(40, (int) Math.round(lv1 * 0.70));
+
+        int z2Min = z1Max + 1;
+        int z2Max = lv1;
+
+        int meioLv1Lv2 = lv1 + (int) Math.round((lv2 - lv1) * 0.5);
+        int z3Min = z2Max + 1;
+        int z3Max = Math.max(z3Min, meioLv1Lv2);
+
+        int z4Min = Math.max(z3Max + 1, lv2 - 4);
+        int z4Max = Math.max(z4Min, lv2);
+
+        int z5Min = Math.max(z4Max + 1, lv2 + 1);
+        int z5Max = Math.max(z5Min, hrMax);
+
+        Map<Integer, HeartRateRange> zones = new HashMap<>();
+        zones.put(1, new HeartRateRange(z1Min, z1Max));
+        zones.put(2, new HeartRateRange(z2Min, z2Max));
+        zones.put(3, new HeartRateRange(z3Min, z3Max));
+        zones.put(4, new HeartRateRange(z4Min, z4Max));
+        zones.put(5, new HeartRateRange(z5Min, z5Max));
+        return zones;
+    }
+    public int calculateThresholdZone(double bpm, int lv1, int lv2, int hrMax) {
+        Map<Integer, HeartRateRange> zones = calculateZonesFromThresholds(lv1, lv2, hrMax);
+        int bpmInt = (int) Math.round(bpm);
+
+        for (int z = 1; z <= 5; z++) {
+            HeartRateRange range = zones.get(z);
+            if (range != null && bpmInt >= range.minBpm() && bpmInt <= range.maxBpm()) {
+                return z;
+            }
+        }
+
+        int melhorZona = 2;
+        int menorDistancia = Integer.MAX_VALUE;
+
+        for (int z = 1; z <= 5; z++) {
+            HeartRateRange range = zones.get(z);
+            if (range != null) {
+                int centro = (range.minBpm() + range.maxBpm()) / 2;
+                int distancia = Math.abs(bpmInt - centro);
+                if (distancia < menorDistancia) {
+                    menorDistancia = distancia;
+                    melhorZona = z;
+                }
+            }
+        }
+
+        return melhorZona;
+    }
+
+    public int resolveZoneForBpm(double bpm, String hrZoneSource, Integer lv1, Integer lv2, Integer hrMax, Integer hrResting) {
+        boolean hasThresholds = lv1 != null && lv2 != null && hrMax != null && lv1 > 0 && lv2 > lv1 && hrMax >= lv2;
+        if ("EXAM".equalsIgnoreCase(hrZoneSource) && hasThresholds) {
+            return calculateThresholdZone(bpm, lv1, lv2, hrMax);
+        }
+
+        int effectiveHrMax = (hrMax != null) ? hrMax : 0;
+        int effectiveHrResting = (hrResting != null) ? hrResting : 0;
+        return calculateKarvonenZone(bpm, effectiveHrMax, effectiveHrResting);
     }
 
     /**
@@ -2295,10 +2796,7 @@ package jackson.stravafit.service;
 
 import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.*;
-import jackson.stravafit.repository.ActivityRepository;
-import jackson.stravafit.repository.ActivitySummaryRepository;
-import jackson.stravafit.repository.UserRepository;
-import jackson.stravafit.repository.WorkoutPrescriptionRepository;
+import jackson.stravafit.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -2339,6 +2837,8 @@ public class InsightService {
     private final KnowledgeService knowledgeService;
     private final InsightService self;
     private final OpenMeteoService openMeteoService;
+    private final UserGoalRepository userGoalRepository;
+    private final UserGoalService userGoalService;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     private static final DateTimeFormatter BRAZIL_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
@@ -2352,7 +2852,9 @@ public class InsightService {
                           UserRepository userRepository,
                           ActivityService activityService,
                           @Lazy InsightService self,
-                          KnowledgeService knowledgeService, OpenMeteoService openMeteoService) {
+                          KnowledgeService knowledgeService, OpenMeteoService openMeteoService,
+                          UserGoalRepository userGoalRepository,
+                          UserGoalService userGoalService) {
         this.geminiClient = geminiClient;
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
@@ -2362,6 +2864,8 @@ public class InsightService {
         this.self = self;
         this.knowledgeService = knowledgeService;
         this.openMeteoService = openMeteoService;
+        this.userGoalRepository = userGoalRepository;
+        this.userGoalService = userGoalService;
     }
 
     public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {
@@ -2414,7 +2918,10 @@ public class InsightService {
         return insightDaIA;
     }
 
-    private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, StravaActivity activity, String climaHeader) {
+    private String generateInsight(UserEntity user, Long activityId, String name, Double distance,
+                                   String dateStr, Double averageSpeed,
+                                   List<StravaActivity.MinuteAnalysis> analysis,
+                                   StravaActivity activity, String climaHeader) {
 
         // 1. Primeiro calculamos as mÃ©tricas essenciais e as datas baseadas nas preferÃªncias do atleta
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
@@ -2424,6 +2931,11 @@ public class InsightService {
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior =
                 workoutPrescriptionRepository.findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(
                         user.getId(), activityDate.toLocalDate());
+        Optional<UserGoalEntity> objetivoAtivoOpt = userGoalRepository
+                .findFirstByUserIdAndActiveTrueOrderByCreatedAtDesc(user.getId());
+        String styleContextMongo = userGoalService.getActiveStyleContext(user);
+
+
         // 2. Classificamos o estÃ­mulo para saber qual cenÃ¡rio a sessÃ£o atual pertence
         ClassificacaoResultado resultado = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
         String tipoEstimuloReal = resultado.tipoEstimulo();
@@ -2459,10 +2971,9 @@ public class InsightService {
                 .filter(a -> a.getActivityId() == null || !a.getActivityId().equals(activityId))
                 .collect(Collectors.toList());
 
-        // Busca no MySQL a prescriÃ§Ã£o agendada para o prÃ³ximo treino (TerÃ§a, Quinta ou SÃ¡bado)
         LocalDate dataProximo = parseNextWorkoutDate(proximoTreinoData);
         // Garantir que o tipo retornado seja Optional
-        // Garanta que NÃƒO haja .orElse(null) no final desta linha:
+
         Optional<WorkoutPrescriptionEntity> proximaPrescricao =
                 workoutPrescriptionRepository.findByUserIdAndScheduledDate(user.getId(), dataProximo);
 
@@ -2485,18 +2996,24 @@ public class InsightService {
             listaCenario1.sort(Comparator.comparing(ActivitySummaryEntity::getStartDate).reversed());
         }
 
-        // 6. SeparaÃ§Ã£o precisa por dia da semana na memÃ³ria
-        List<ActivitySummaryEntity> listaTercas = listaCenario1.stream()
-                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
+        List<DayOfWeek> diasOrdenados = (diasConfigurados != null && !diasConfigurados.isEmpty())
+                ? diasConfigurados.stream().sorted(Comparator.comparingInt(DayOfWeek::getValue)).toList()
+                : List.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
+
+        DayOfWeek diaBaseCurto = diasOrdenados.get(0);
+        DayOfWeek diaBaseLongo = diasOrdenados.get(diasOrdenados.size() - 1);
+
+        List<ActivitySummaryEntity> listaBaseCurta = listaCenario1.stream()
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == diaBaseCurto)
                 .toList();
 
-        List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
-                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
+        List<ActivitySummaryEntity> listaBaseLonga = listaCenario1.stream()
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == diaBaseLongo)
                 .toList();
 
-        // 7. CÃ¡lculo das mÃ©dias de eficiÃªncia incluindo o treino de hoje
-        double mediaEficienciaZ2Curto = calcularMediaEficienciaDaLista(listaTercas, 5);
-        double mediaEficienciaZ2Longo = calcularMediaEficienciaDaLista(listaSabados, 5);
+        // 7. CÃ¡lculo das mÃ©dias de eficiÃªncia incluindo o treino do dia
+        double mediaEficienciaZ2Curto = calcularMediaEficienciaDaLista(listaBaseCurta, 5);
+        double mediaEficienciaZ2Longo = calcularMediaEficienciaDaLista(listaBaseLonga, 5);
         double mediaEficienciaTiros = calcularMediaEficienciaDaLista(listaTiros, 5);
 
         // 8. Busca no MySQL a prescriÃ§Ã£o agendada para a data do treino de hoje
@@ -2558,7 +3075,8 @@ public class InsightService {
                 mediaEficienciaZ2Curto,
                 mediaEficienciaZ2Longo,
                 historicoPerformanceGlobal,
-                climaHeader
+                climaHeader, objetivoAtivoOpt.orElse(null),
+                styleContextMongo
         );
 
         String rawAiResponse = geminiClient.getInsight(prompt);
@@ -2579,10 +3097,15 @@ public class InsightService {
             ActivitySummaryEntity summary = activitySummaryRepository.findByActivityId(activityId)
                     .orElseGet(() -> activitySummaryRepository.findById(activityId)
                             .orElse(new ActivitySummaryEntity()));
-            UserEntity userRef = userRepository.getReferenceById(userId);
+
+            UserEntity owner = (userId != null)
+                    ? userRepository.findById(userId).orElse(null)
+                    : null;
 
             summary.setActivityId(activityId);
-            summary.setUser(userRef);
+            if (owner != null) {
+                summary.setUser(owner);
+            }
             summary.setStartDate(activityDate.toLocalDateTime());
             summary.setDistanceKm(metrics.safeDistance());
             summary.setTotalTimeMinutes(metrics.duracao());
@@ -2661,7 +3184,8 @@ public class InsightService {
                                            double mediaEficienciaZ2Curto,
                                            double mediaEficienciaZ2Longo,
                                            String historicoPerformanceGlobal,
-                                           String climaHeader) {
+                                           String climaHeader, UserGoalEntity objetivoAtivo,
+                                           String styleContextMongo) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
         List<ActivityEntity> historico = activityRepository.findTop10ByUserIdOrderByStartDateDesc(user.getId());
@@ -2669,7 +3193,12 @@ public class InsightService {
         int hrMax = user.getHrMax();
         int hrRest = user.getHrResting();
         String nomeAtletaReal = (user.getName() != null && !user.getName().isBlank()) ? user.getName() : "Atleta";
-        boolean proximoEhSabado = proximoTreinoData.toUpperCase().contains("SÃBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
+        List<DayOfWeek> diasAtletaOrdenados = parseTrainingDays(user.getTrainingDays()).stream()
+                .sorted(Comparator.comparingInt(DayOfWeek::getValue))
+                .toList();
+        String resumoDiasAtleta = diasAtletaOrdenados.stream()
+                .map(DayOfWeek::name)
+                .collect(Collectors.joining(", "));
 
         double histVo2Medio = historico.stream().mapToDouble(a -> 15.3 * ((a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMax) / (double) hrRest)).average().orElse(0.0);
         double histFcMaxMedia = historico.stream().mapToDouble(a -> a.getMaxHeartRate() != null ? a.getMaxHeartRate() : 0).average().orElse(0.0);
@@ -2679,15 +3208,7 @@ public class InsightService {
 
         StringBuilder sb = new StringBuilder();
 
-        // Data Fixa da Prova Alvo (Meia Maratona 2026)
-        LocalDate dataProvaAlvo = LocalDate.of(2026, 10, 31);
         LocalDate dataTreinoAtual = date.toLocalDate();
-        boolean ehDiaDaProvaAlvo = dataTreinoAtual.equals(dataProvaAlvo);
-
-        // CÃ¡lculo de dias e semanas restantes
-        long diasRestantes = java.time.temporal.ChronoUnit.DAYS.between(dataTreinoAtual, dataProvaAlvo);
-        long semanasRestantes = (diasRestantes > 0) ? (diasRestantes / 7) + 1 : 0;
-
 
         sb.append("VOCÃŠ Ã‰ O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
         sb.append("SUA MISSÃƒO Ã‰ ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÃ“STICO FISIOLÃ“GICO, PRESCREVER A RECUPERAÃ‡ÃƒO E GERAR O PRÃ“XIMO TREINO.\n\n");
@@ -2703,14 +3224,10 @@ public class InsightService {
 
         sb.append("âœ… JEITO CERTO (Natural, parceiro e descontraÃ­do):\n");
         sb.append("  'Fala, ").append(nomeAtletaReal).append("! Beleza? Cara, que treino sensacional vocÃª entregou hoje! Fechar os 10.1 km cravando 95% do tempo na Zona 2 mostra um controle de ritmo absurdo.\n");
-        sb.append("  Seu Efficiency Index bateu 1.117, o que Ã© uma marca excelente. Na prÃ¡tica, seu corpo tÃ¡ ficando cada vez mais eficiente em queimar gordura como combustÃ­vel (massa demais pra preparaÃ§Ã£o da Meia Maratona!). O coraÃ§Ã£o trabalhou super estÃ¡vel, mesmo com essa garoa e umidade alta...'\n\n");
+        sb.append("  Seu Efficiency Index bateu 1.117, o que Ã© uma marca excelente. Na prÃ¡tica, seu corpo tÃ¡ ficando cada vez mais eficiente em queimar gordura como combustÃ­vel. O coraÃ§Ã£o trabalhou super estÃ¡vel, mesmo com essa garoa e umidade alta...'\n\n");
 
         sb.append("REGRA DE FORMATAÃ‡ÃƒO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÃTULOS EM MAIÃšSCULAS E QUEBRAS DE LINHA. Ã‰ ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
         sb.append("--- CONDIÃ‡Ã•ES CLIMÃTICAS NO MOMENTO DO TREINO ---\n");
-
-        if (ehDiaDaProvaAlvo) {
-            sb.append("ðŸš¨ ATENÃ‡ÃƒO IA - DIRETRIZ ESPECIAL DE PROVA OFICIAL: HOJE Ã‰ O DIA DA MEIA MARATONA OFICIAL (21.1 KM). Substitua obrigatoriamente todos os termos 'Treino' por 'Meia Maratona' ou 'Prova Oficial' no cabeÃ§alho e ao longo de todo o relatÃ³rio.\n\n");
-        }
 
         sb.append("INSTRUÃ‡ÃƒO FISIOLÃ“GICA: Considere o estresse tÃ©rmico acima na anÃ¡lise. Se a umidade for alta (>80%) ou a temperatura for elevada (>25Â°C), mencione o impacto no aumento da FrequÃªncia CardÃ­aca (dÃ©bito cardÃ­aco) para termorregulaÃ§Ã£o e dÃª recomendaÃ§Ãµes de hidrataÃ§Ã£o e recuperaÃ§Ã£o.\n\n");
 
@@ -2728,6 +3245,27 @@ public class InsightService {
         sb.append("--- CONTEXTO HISTÃ“RICO DE LEITURA INTERNA (ÃšLTIMAS ATIVIDADES GLOBAIS) ---\n");
         sb.append("ATENÃ‡ÃƒO IA: Use o histÃ³rico abaixo APENAS como base de conhecimento interna para avaliar a evoluÃ§Ã£o na SeÃ§Ã£o 4.0. Ã‰ PROIBIDO IMPRIMIR ESTE BLOCO NO TELEGRAM:\n");
         sb.append(historicoPerformanceGlobal).append("\n\n");
+
+        sb.append("--- OBJETIVO ATIVO E DIRETRIZ DE ESTILO DO ATLETA ---\n");
+        if (objetivoAtivo != null) {
+            sb.append("- Categoria do Objetivo: ").append(objetivoAtivo.getCategory());
+            if (objetivoAtivo.getCategory() != null) {
+                sb.append(" (").append(objetivoAtivo.getCategory().getLabel()).append(")");
+            }
+            sb.append("\n");
+            sb.append("- CÃ³digo de Estilo de Treino: ").append(objetivoAtivo.getTrainingStyleCode()).append("\n");
+            if (objetivoAtivo.getEvent() != null) {
+                sb.append("- Evento/Prova Vinculada: ").append(objetivoAtivo.getEvent().getEventName())
+                        .append(" | Data: ").append(objetivoAtivo.getEvent().getEventDate())
+                        .append(" | DistÃ¢ncia Alvo: ").append(objetivoAtivo.getEvent().getTargetDistanceKm()).append(" km\n");
+            }
+        } else {
+            sb.append("- Objetivo Ativo: NÃ£o definido (usar rotina/consistÃªncia padrÃ£o).\n");
+        }
+        if (styleContextMongo != null && !styleContextMongo.isBlank()) {
+            sb.append("- Diretriz do Estilo no MongoDB:\n").append(styleContextMongo).append("\n");
+        }
+        sb.append("\n");
 
         sb.append("--- DADOS DO TREINO ATUAL ---\n");
         sb.append("DADOS DO TREINO: ").append(name).append(" | ").append(String.format("%.1f km", metrics.safeDistance())).append(" | Pace MÃ©dio: ").append(metrics.paceFormatted()).append("\n");
@@ -2757,11 +3295,15 @@ public class InsightService {
         sb.append("ðŸ“Š ESFORÃ‡O POR ZONA CARDÃACA:\n");
         java.util.Map<Integer, Integer> minBpms = new java.util.HashMap<>();
         java.util.Map<Integer, Integer> maxBpms = new java.util.HashMap<>();
-        for (int bpm = hrRest; bpm <= hrMax; bpm++) {
-            int z = activityService.calculateKarvonenZone(bpm, hrMax, hrRest);
-            if (z > 0) {
-                minBpms.putIfAbsent(z, bpm);
-                maxBpms.put(z, bpm);
+        String hrZoneSource = user.getHrZoneSource();
+        Integer lv1 = user.getZ2MaxBpm();
+        Integer lv2 = user.getZ4MaxBpm();
+
+        for (int bpm = Math.min(50, hrRest); bpm <= hrMax; bpm++) {
+            int z = activityService.resolveZoneForBpm(bpm, hrZoneSource, lv1, lv2, hrMax, hrRest);
+            if (z >= 1 && z <= 5) {
+                if (bpm < minBpms.getOrDefault(z, Integer.MAX_VALUE)) minBpms.put(z, bpm);
+                if (bpm > maxBpms.getOrDefault(z, 0)) maxBpms.put(z, bpm);
             }
         }
         Map<Integer, Double> zonePercentages = metrics.zonePercentages();
@@ -2782,10 +3324,10 @@ public class InsightService {
         }
         sb.append("\n\n");
 
-        sb.append("ðŸ“ˆ MÃ‰DIAS DE EFICIÃŠNCIA ACUMULADAS (5 treinos):\n");
-        sb.append("â€¢ Rodagem Curta (TerÃ§a): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" | NÃ­vel ").append(nivelAtualCenario1).append("\n");
-        sb.append("â€¢ Tiros / VO2mÃ¡x (Quinta): ").append(String.format("%.3f", mediaEficienciaTiros)).append(" | NÃ­vel ").append(nivelAtualCenario2).append("\n");
-        sb.append("â€¢ LongÃ£o (SÃ¡bado): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" | NÃ­vel ").append(nivelAtualCenario1).append("\n");
+        sb.append("ðŸ“ˆ MÃ‰DIAS DE EFICIÃŠNCIA ACUMULADAS (5 treinos) | DIAS DO ATLETA (").append(resumoDiasAtleta).append("):\n");
+        sb.append("â€¢ Base Curta / CenÃ¡rio 1: ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" | NÃ­vel ").append(nivelAtualCenario1).append("\n");
+        sb.append("â€¢ Tiros / CenÃ¡rio 2: ").append(String.format("%.3f", mediaEficienciaTiros)).append(" | NÃ­vel ").append(nivelAtualCenario2).append("\n");
+        sb.append("â€¢ Base Longa / CenÃ¡rio 1: ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" | NÃ­vel ").append(nivelAtualCenario1).append("\n");
 
         sb.append("ðŸ“Š HISTÃ“RICO MÃ‰DIO (10 treinos):\n");
         sb.append("- VO2 MÃ¡x MÃ©dio: ").append(String.format("%.1f", histVo2Medio)).append(" ml/kg/min\n");
@@ -2832,19 +3374,7 @@ public class InsightService {
         sb.append("â€¢ Justifique a estabilidade utilizando o Desvio PadrÃ£o de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" janelas instÃ¡veis identificadas pelo sistema.\n");
         sb.append("â€¢ Avalie a presenÃ§a ou ausÃªncia de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n\n");
 
-        sb.append("3.5 - ðŸŽ¯ AVALIAÃ‡ÃƒO DE PRONTIDÃƒO E PREPARO PARA A MEIA MARATONA (31/10/2026):\n");
-        sb.append("[FOCO EXCLUSIVO: ANÃLISE DE PRONTIDÃƒO, PREVENÃ‡ÃƒO DE LESÃ•ES E ESTRATÃ‰GIA DE PROVA]\n");
-        sb.append("â€¢ CONTAGEM REGRESSIVA OFICIAL: Faltam exatamente ").append(diasRestantes).append(" dias (aprox. ")
-                .append(semanasRestantes).append(" semanas) para a Meia Maratona de 31/10/2026.\n");
-        sb.append("â€¢ Consulte no contexto do MongoDB o documento 'macro_ciclo_meia_maratona_2026' ou 'DIRETRIZ_PROVA_ALVO' correspondente Ã  fase atual (Faltam ").append(diasRestantes).append(" dias).\n");
-        sb.append("â€¢ Com base no treino executado HOJE por ").append(nomeAtletaReal).append(" (Pace: ").append(metrics.paceFormatted())
-                .append(", FC MÃ©dia: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm, Efficiency Index: ")
-                .append(String.format("%.3f", metrics.efficiencyIndex())).append("), desenvolva uma anÃ¡lise cobrindo obrigatoriamente:\n");
-        sb.append("  1. PRONTIDÃƒO E PACE DE PROVA: AvaliaÃ§Ã£o da capacidade de sustentar os 21.1 km com a economia de corrida demonstrada hoje.\n");
-        sb.append("  2. PRESERVAÃ‡ÃƒO MUSCULAR E PREVENÃ‡ÃƒO DE LESÃ•ES: OrientaÃ§Ãµes prÃ¡ticas de fortalecimento (foco em sÃ³leo, quadrÃ­ceps e visualizaÃ§Ã£o de estabilizaÃ§Ã£o) e alongamentos pÃ³s-treino.\n");
-        sb.append("  3. FOCO MENTAL E DETERMINAÃ‡ÃƒO: InstruÃ§Ã£o tÃ¡tica para controle de ansiedade, gestÃ£o de ritmo e disciplina de pace em Z2.\n\n");
-
-       sb.append("  - DIRETRIZ DE IMPACTO AMBIENTAL: Em casos de STATUS [CUMPRIDO PARCIALMENTE | NÃƒO CUMPRIDO] ou desempenho excepcional/abaixo do esperado, analise OBRIGATORIAMENTE o impacto direto do ganho/perda de elevaÃ§Ã£o e das condiÃ§Ãµes climÃ¡ticas sobre o ritmo, fadiga e frequÃªncia cardÃ­aca do atleta, utilizando os dados abaixo:\n")
+        sb.append("  - DIRETRIZ DE IMPACTO AMBIENTAL: Em casos de STATUS [CUMPRIDO PARCIALMENTE | NÃƒO CUMPRIDO] ou desempenho excepcional/abaixo do esperado, analise OBRIGATORIAMENTE o impacto direto do ganho/perda de elevaÃ§Ã£o e das condiÃ§Ãµes climÃ¡ticas sobre o ritmo, fadiga e frequÃªncia cardÃ­aca do atleta, utilizando os dados abaixo:\n")
                 .append("     CondiÃ§Ãµes ClimÃ¡ticas: ").append(climaHeader).append("\n")
                 .append("     Altimetria Acumulada: +").append(String.format("%.0f", metrics.ganhoAlt())).append("m de ganho / -").append(String.format("%.0f", Math.abs(metrics.perdaAlt())))
                 .append("m de perda (VariaÃ§Ã£o Total em Circuito: ")
@@ -2863,17 +3393,17 @@ public class InsightService {
 
         sb.append("â€¢ Ã‰ ESTRITAMENTE PROIBIDO repetir explicaÃ§Ãµes sobre PGC-1alpha, mitocÃ´ndrias ou autores jÃ¡ citados na SeÃ§Ã£o 2.0.\n\n");
         sb.append("4.0 - ðŸŽ¯ CONCLUSÃƒO E PRÃ“XIMO PASSO \n");
-        sb.append("- OBJETIVO DA SEÃ‡ÃƒO: Fazer um fechamento leve, sucinto e 100% focado no progresso prÃ¡tico para a Meia Maratona. Ã‰ ESTRITAMENTE PROIBIDO repetir nÃºmeros, mÃ©dias histÃ³ricas ou teorias fisiolÃ³gicas jÃ¡ explicadas nas seÃ§Ãµes 2.0 e 3.0.\n");
+        sb.append("- OBJETIVO DA SEÃ‡ÃƒO: Fazer um fechamento leve, sucinto e 100% focado no progresso. Ã‰ ESTRITAMENTE PROIBIDO repetir nÃºmeros, mÃ©dias histÃ³ricas ou teorias fisiolÃ³gicas jÃ¡ explicadas nas seÃ§Ãµes 2.0 e 3.0.\n");
         sb.append("- LINGUAGEM: Use linguagem simples, descontraÃ­da e motivadora (como uma conversa direta de treinador para atleta).\n");
         sb.append("- REGRAS DINÃ‚MICAS DE CONTEÃšDO:\n");
         sb.append("  â€¢ Diga em poucas palavras o que o treino executado HOJE agrega na prÃ¡tica.\n");
-        sb.append("  â€¢ Adapte a conexÃ£o com o prÃ³ximo treino de acordo com o calendÃ¡rio real (ex: se hoje foi TerÃ§a, mencione o preparo para Quinta; se hoje foi Quinta, mencione o descanso/preparo para o Fim de Semana; se foi Fim de Semana, mencione a recuperaÃ§Ã£o para a prÃ³xima TerÃ§a).\n");
-        sb.append("  â€¢ Finalize com uma mensagem curta e empolgante focada na Meia Maratona de 31/10/2026.\n\n");
+        sb.append("  â€¢ Conecte o treino de hoje ao prÃ³ximo treino agendado (").append(proximoTreinoData)
+                .append(") e aos dias de treino configurados pelo atleta (").append(resumoDiasAtleta).append(").\n");
 
         sb.append("--- ESTRUTURA DO EXEMPLO DE CONCLUSÃƒO (ADAPTE AO DIA E TREINO REAL) ---\n");
         sb.append("âœ… '4.0 - ðŸŽ¯ CONCLUSÃƒO E PRÃ“XIMO PASSO\n");
         sb.append("  [Primeiro Nome], o treino de hoje [Tipo do Treino de Hoje] cumpriu perfeitamente o papel de [BenefÃ­cio PrÃ¡tico em linguagem simples]. Ã‰ essa consistÃªncia que garante o corpo pronto para [ConexÃ£o com o PrÃ³ximo Treino Prescrito]!\n");
-        sb.append("  VocÃª tÃ¡ construindo um ritmo de prova cada vez mais sÃ³lido. MantÃ©m o foco e a disciplina que a Meia Maratona de 31/10 tÃ¡ logo ali e vocÃª vai chegar voando! Tamo junto nessa! ðŸš€'\n\n");
+        sb.append("  VocÃª tÃ¡ construindo um ritmo cada vez mais sÃ³lido. ðŸš€'\n\n");
 
         sb.append("5.0 - ðŸ½ï¸ NUTRIÃ‡ÃƒO / DESCANSO ðŸ’¤\n");
         sb.append("[Prescreva a estratÃ©gia detalhada de alimentaÃ§Ã£o prÃ©/pÃ³s treino e janelas de repouso conforme as diretrizes do MongoDB para o tipo de treino realizado HOJE. Se foi Z2 use 'light_moderated_days', se foi Tiros use 'high_intensity_days']\n\n");
@@ -2930,7 +3460,22 @@ public class InsightService {
                 .map(StravaActivity.MinuteAnalysis::getAverageHeartRate)
                 .filter(Objects::nonNull)
                 .toList();
-        Map<Integer, Double> zonePercentages = activityService.calculateZonePercentages(hrData, hrMax, hrRest);
+        String hrZoneSource = user.getHrZoneSource();
+        Integer lv1 = user.getZ2MaxBpm();
+        Integer lv2 = user.getZ4MaxBpm();
+
+        Map<Integer, Long> zoneCounts = hrData.stream()
+                .map(bpm -> activityService.resolveZoneForBpm(bpm, hrZoneSource, lv1, lv2, hrMax, hrRest))
+                .filter(z -> z > 0)
+                .collect(Collectors.groupingBy(z -> z, Collectors.counting()));
+
+        long totalMinutos = hrData.size();
+        Map<Integer, Double> zonePercentages = new java.util.HashMap<>();
+        for (int z = 1; z <= 5; z++) {
+            long count = zoneCounts.getOrDefault(z, 0L);
+            double pct = totalMinutos > 0 ? (count * 100.0) / totalMinutos : 0.0;
+            zonePercentages.put(z, pct);
+        }
 
         int zonaPredominante = zonePercentages.entrySet().stream()
                 .filter(entry -> entry.getKey() > 0)
@@ -3035,17 +3580,22 @@ public class InsightService {
 
     private String calcularProximaDataTreino(ZonedDateTime date, Set<DayOfWeek> diasDeTreino) {
         LocalDate today = LocalDate.now(ZONE_SP);
-        LocalDate baseDate = date.toLocalDate().isBefore(today) ? today : date.toLocalDate();
+        LocalDate baseDate = (date != null && !date.toLocalDate().isBefore(today))
+                ? date.toLocalDate()
+                : today;
         LocalDate dataIteracao = baseDate.plusDays(1);
 
         Set<DayOfWeek> diasValidos = (diasDeTreino != null && !diasDeTreino.isEmpty())
                 ? diasDeTreino
                 : Set.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
 
-        while (!diasValidos.contains(dataIteracao.getDayOfWeek())) {
+        int tentativas = 0;
+        while (!diasValidos.contains(dataIteracao.getDayOfWeek()) && tentativas < 7) {
             dataIteracao = dataIteracao.plusDays(1);
+            tentativas++;
         }
-        return dataIteracao.format(NEXT_WORKOUT_FORMATTER);
+
+        return dataIteracao.format(NEXT_WORKOUT_FORMATTER.withLocale(java.util.Locale.forLanguageTag("pt-BR")));
     }
 
     private int determinarCenarioAlvo(DayOfWeek diaAgendado, Set<DayOfWeek> diasDoAtleta) {
@@ -3145,6 +3695,7 @@ ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jacks
 package jackson.stravafit.service;
 
 import jackson.stravafit.model.Gender;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -3154,16 +3705,20 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+
 @Slf4j
 @Service
 public class KnowledgeService {
 
     private final MongoTemplate mongoTemplate;
     private final Map<Gender, String> contextCache = new ConcurrentHashMap<>();
+    private final String baseCollectionName;
 
-    // O Spring Boot injeta o MongoTemplate prÃ©-configurado com a sua conexÃ£o do strava_fit_db
-    public KnowledgeService(MongoTemplate mongoTemplate) {
+    public KnowledgeService(
+            MongoTemplate mongoTemplate,
+            @Value("${stravafit.mongodb.knowledge-collection:training_styles}") String baseCollectionName) {
         this.mongoTemplate = mongoTemplate;
+        this.baseCollectionName = baseCollectionName;
     }
 
     public String getScientificContext(Gender gender) {
@@ -3178,7 +3733,8 @@ public class KnowledgeService {
             }
 
             // 3. Define dinamicamente o nome da coleÃ§Ã£o usando a variÃ¡vel activeGender
-            String collectionName = (activeGender == Gender.FEMALE) ? "scenarios_female" : "scenarios_male";
+            String suffix = (activeGender == Gender.FEMALE) ? "_female" : "_male";
+            String collectionName = baseCollectionName + suffix;
             log.info("[MONGO] Buscando documentos de inteligÃªncia na coleÃ§Ã£o '{}'...", collectionName);
 
             List<Document> documentos = mongoTemplate.findAll(Document.class, collectionName);
@@ -3369,7 +3925,7 @@ public class StravaAuthService {
     private final String clientSecret;
     private final RestClient restClient;
 
-    public StravaAuthService(RestClient.Builder builder,
+        public StravaAuthService(RestClient.Builder builder,
                              @Value("${strava.client.id}") String clientId,
                              @Value("${strava.client.secret}") String clientSecret) {
         this.restClient = builder.baseUrl("https://www.strava.com").build();
@@ -3391,6 +3947,47 @@ public class StravaAuthService {
                 .retrieve()
                 .body(TokenResponse.class);
     }
+    public TokenResponse exchangeAuthorizationCode(String authorizationCode) {
+        return restClient.post()
+                .uri("/api/v3/oauth/token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .body(Map.of(
+                        "client_id", clientId,
+                        "client_secret", clientSecret,
+                        "code", authorizationCode,
+                        "grant_type", "authorization_code"
+                ))
+                .retrieve()
+                .body(TokenResponse.class);
+    }
+    public String buildAuthorizationUrl(String redirectUri, String state) {
+        return org.springframework.web.util.UriComponentsBuilder
+                .fromUriString("https://www.strava.com/oauth/authorize")
+                .queryParam("client_id", clientId)
+                .queryParam("response_type", "code")
+                .queryParam("redirect_uri", redirectUri)
+                .queryParam("approval_prompt", "force")
+                .queryParam("scope", "activity:read_all")
+                .queryParam("state", state)
+                .build()
+                .toUriString();
+    }
+    public Long fetchAthleteId(String accessToken) {
+        Map<?, ?> athlete = restClient.get()
+                .uri("/api/v3/athlete")
+                .headers(headers -> headers.setBearerAuth(accessToken))
+                .accept(MediaType.APPLICATION_JSON)
+                .retrieve()
+                .body(Map.class);
+
+        if (athlete != null && athlete.get("id") instanceof Number num) {
+            return num.longValue();
+        }
+        return null;
+    }
+
+
 }
 
 
@@ -3507,10 +4104,10 @@ public class SyncScheduler {
 
             if (treinoPendente.isPresent()) {
                 StravaActivity activity = treinoPendente.get();
-                log.info("-> NOVO TREINO DETECTADO PARA {}: {} (ID: {})", user.getName(), activity.getName(), activity.getId());
+                log.info("-> NOVO TREINO DETECTADO PARA ANÃLISE: {} (ID: {}) | Atleta: {}", activity.getName(), activity.getId(), user.getName());
                 processarEEnviar(user, activity);
             } else {
-                log.info("-> Todos os treinos recentes de {} jÃ¡ estÃ£o processados no MySQL. Acionando fallback...", user.getName());
+                log.info("-> Nenhum treino novo pendente para {}. Verificando Ãºltimo insight...", user.getName());
                 enviarLembreteUltimoInsight(user);
             }
 
@@ -3527,19 +4124,22 @@ public class SyncScheduler {
 
     private void processarEEnviar(UserEntity user, StravaActivity activity) {
         try {
-            int hrMax = user.getHrMax();
-            int hrResting = user.getHrResting();
+            Integer hrMax = user.getHrMax();
+            Integer hrResting = user.getHrResting();
+            String hrZoneSource = user.getHrZoneSource();
+            Integer lv1 = user.getZ2MaxBpm();
+            Integer lv2 = user.getZ4MaxBpm();
 
             List<StravaActivity.ActivityStream> streams =
                     activityService.getActivityStreams(user.getStravaAccessToken(), activity.getId());
 
             List<StravaActivity.MinuteAnalysis> minuteAnalysis =
-                    activityService.aggregateStreamsByMinute(streams, null, hrMax, hrResting);
+                    activityService.aggregateStreamsByMinute(streams, null, hrZoneSource, lv1, lv2, hrMax, hrResting);
 
             String insight = insightService.getActivityInsight(activity, minuteAnalysis);
 
             String zonaDominante = activityService.calculateDominantZoneSummary(
-                    activityService.getHeartRateStream(streams), hrMax, hrResting);
+                    activityService.getHeartRateStream(streams), hrZoneSource, lv1, lv2, hrMax, hrResting);
 
             if (isValidInsight(insight)) {
                 telegramClient.sendMessage("NOVO TREINO ANALISADO: " + activity.getName() + "\n\n" + insight);
@@ -3553,8 +4153,8 @@ public class SyncScheduler {
                                 dateStr, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
                         if (startDate.getDayOfWeek() == java.time.DayOfWeek.SATURDAY) {
-                            log.info("   [WEEKLY PLANNER] Treino de sÃ¡bado detectado! Disparando planejamento para a prÃ³xima semana...");
-                            weeklyPlannerService.gerenciarPlanejamentoSemanal();
+                            log.info("   [WEEKLY PLANNER] Treino de sÃ¡bado detectado para {}! Disparando planejamento da prÃ³xima semana...", user.getName());
+                            weeklyPlannerService.gerenciarPlanejamentoSemanalParaUsuario(user);
                         }
                     }
                 } catch (Exception e) {
@@ -3594,7 +4194,7 @@ public class SyncScheduler {
         try {
             TokenResponse novoToken = authService.refreshToken(user.getStravaRefreshToken());
             user.setStravaAccessToken(novoToken.getAccessToken());
-            if (novoToken.getRefreshToken() != null) {
+            if (novoToken.getRefreshToken() != null && !novoToken.getRefreshToken().isBlank()) {
                 user.setStravaRefreshToken(novoToken.getRefreshToken());
             }
             user.setStravaTokenExpiresAt(novoToken.getExpiresAt());
@@ -3635,6 +4235,183 @@ public class SyncScheduler {
 
 
 ==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\service\TrainingStyleService.java
+==========================================
+package jackson.stravafit.service;
+
+import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.stereotype.Service;
+
+import java.util.Locale;
+
+@Slf4j
+@Service
+public class TrainingStyleService {
+
+    private final MongoTemplate mongoTemplate;
+    private final String baseCollectionName;
+
+    public TrainingStyleService(
+            MongoTemplate mongoTemplate,
+            @Value("${stravafit.mongodb.training-styles-collection:training_styles}") String baseCollectionName) {
+        this.mongoTemplate = mongoTemplate;
+        this.baseCollectionName = baseCollectionName;
+    }
+
+    public String resolveStyleContext(String trainingStyleCode, String gender) {
+        if (trainingStyleCode == null || trainingStyleCode.isBlank()) {
+            return "Estilo de treino nÃ£o especificado; manter equilÃ­brio entre consistÃªncia, base aerÃ³bica e seguranÃ§a.";
+        }
+
+        String normalizedGender = (gender != null && !gender.isBlank())
+                ? gender.trim().toLowerCase(Locale.ROOT)
+                : null;
+
+        try {
+            if (normalizedGender != null) {
+                String genderCollection = baseCollectionName + "_" + normalizedGender;
+                Document docByGenderCol = findStyleDocument(genderCollection, trainingStyleCode, gender);
+                if (docByGenderCol != null) {
+                    return docByGenderCol.toJson();
+                }
+            }
+
+            Document docInBaseCol = findStyleDocument(baseCollectionName, trainingStyleCode, gender);
+            if (docInBaseCol != null) {
+                return docInBaseCol.toJson();
+            }
+        } catch (Exception e) {
+            log.warn("[MONGO-STYLE] Falha ao consultar estilo '{}' (gender={}): {}",
+                    trainingStyleCode, gender, e.getMessage());
+        }
+
+        return "Estilo de treino: " + trainingStyleCode
+                + (gender != null ? " | GÃªnero: " + gender : "")
+                + " (documento ainda nÃ£o cadastrado no MongoDB).";
+    }
+
+    private Document findStyleDocument(String collection, String styleCode, String gender) {
+        if (!mongoTemplate.collectionExists(collection)) {
+            return null;
+        }
+
+        Criteria codeCriteria = new Criteria().orOperator(
+                Criteria.where("styleCode").is(styleCode),
+                Criteria.where("_id").is(styleCode)
+        );
+
+        if (gender != null && !gender.isBlank()) {
+            Query withGender = new Query(new Criteria().andOperator(
+                    codeCriteria,
+                    Criteria.where("gender").is(gender.trim().toUpperCase(Locale.ROOT))
+            ));
+            Document match = mongoTemplate.findOne(withGender, Document.class, collection);
+            if (match != null) {
+                return match;
+            }
+        }
+
+        return mongoTemplate.findOne(new Query(codeCriteria), Document.class, collection);
+    }
+}
+
+
+==========================================
+ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\service\UserGoalService.java
+==========================================
+package jackson.stravafit.service;
+
+import jackson.stravafit.model.*;
+import jackson.stravafit.repository.UserEventRepository;
+import jackson.stravafit.repository.UserGoalRepository;
+import jackson.stravafit.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class UserGoalService {
+
+    private final UserRepository userRepository;
+    private final UserGoalRepository userGoalRepository;
+    private final UserEventRepository userEventRepository;
+    private final TrainingStyleService trainingStyleService;
+
+    @Transactional
+    public UserGoalEntity defineActiveGoal(Long userId, GoalCategory category, String eventName, LocalDate eventDate) {
+        UserEntity user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("UsuÃ¡rio nÃ£o encontrado: " + userId));
+
+        List<UserGoalEntity> existingGoals = userGoalRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        for (UserGoalEntity goal : existingGoals) {
+            if (Boolean.TRUE.equals(goal.getActive())) {
+                goal.setActive(false);
+                userGoalRepository.save(goal);
+            }
+        }
+
+        UserEventEntity linkedEvent = null;
+        boolean hasEventName = eventName != null && !eventName.isBlank();
+        if (hasEventName || eventDate != null) {
+            if (!hasEventName || eventDate == null) {
+                throw new IllegalArgumentException("Informe tanto o nome quanto a data do evento.");
+            }
+            linkedEvent = new UserEventEntity();
+            linkedEvent.setUser(user);
+            linkedEvent.setEventName(eventName.trim());
+            linkedEvent.setEventDate(eventDate);
+            linkedEvent = userEventRepository.save(linkedEvent);
+        }
+        UserGoalEntity newGoal = new UserGoalEntity();
+        newGoal.setUser(user);
+        newGoal.setCategory(category);
+        newGoal.setTrainingStyleCode(category.getTrainingStyleCode());
+        newGoal.setEvent(linkedEvent);
+        newGoal.setActive(true);
+
+        return userGoalRepository.save(newGoal);
+    }
+
+    public Optional<UserGoalEntity> getActiveGoal(Long userId) {
+        return userGoalRepository.findFirstByUserIdAndActiveTrueOrderByCreatedAtDesc(userId);
+    }
+
+    public String getActiveStyleContext(UserEntity user) {
+        if (user == null) {
+            return trainingStyleService.resolveStyleContext(null, null);
+        }
+        String styleCode = (user.getId() != null)
+                ? getActiveGoal(user.getId())
+                .map(UserGoalEntity::getTrainingStyleCode)
+                .orElse(GoalCategory.ROUTINE_CONSISTENCY.getTrainingStyleCode())
+                : GoalCategory.ROUTINE_CONSISTENCY.getTrainingStyleCode();
+        String genderStr = (user.getGender() != null) ? user.getGender().name() : null;
+        return trainingStyleService.resolveStyleContext(styleCode, genderStr);
+    }
+    public int recommendWeeklyFrequency(GoalCategory category) {
+        if (category == null) {
+            return 3;
+        }
+        return switch (category) {
+            case ROUTINE_CONSISTENCY -> 3;
+            case CARDIO_LONGEVITY -> 3;
+            case HIGH_PERFORMANCE -> 4;
+        };
+    }
+}
+
+
+==========================================
 ARQUIVO: C:\Users\Jackson\IdeaProjects\StravaFit-Sync-Engine\src\main\java\jackson\stravafit\service\WeeklyPlannerService.java
 ==========================================
 package jackson.stravafit.service;
@@ -3643,8 +4420,10 @@ import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.client.TelegramClient;
 import jackson.stravafit.model.ActivitySummaryEntity;
 import jackson.stravafit.model.UserEntity;
+import jackson.stravafit.model.UserGoalEntity;
 import jackson.stravafit.model.WorkoutPrescriptionEntity;
 import jackson.stravafit.repository.ActivitySummaryRepository;
+import jackson.stravafit.repository.UserGoalRepository;
 import jackson.stravafit.repository.UserRepository;
 import jackson.stravafit.repository.WorkoutPrescriptionRepository;
 import lombok.RequiredArgsConstructor;
@@ -3656,8 +4435,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Period;
 import java.time.ZoneId;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -3672,6 +4457,8 @@ public class WeeklyPlannerService {
     private final UserRepository userRepository;
     private final KnowledgeService knowledgeService;
     private final TelegramClient telegramClient;
+    private final UserGoalRepository userGoalRepository;
+    private final UserGoalService userGoalService;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
 
@@ -3690,6 +4477,7 @@ public class WeeklyPlannerService {
             gerenciarPlanejamentoSemanalParaUsuario(user);
         }
     }
+
     @Transactional
     public void gerenciarPlanejamentoSemanalParaUsuario(UserEntity user) {
         log.info("[WEEKLY PLANNER] Gerando planejamento semanal para o atleta: {} (ID: {})", user.getName(), user.getId());
@@ -3716,49 +4504,102 @@ public class WeeklyPlannerService {
         return activitySummaryRepository.findByUserIdAndStartDateBetweenOrderByStartDateAsc(userId, inicioSemana, fimSemana);
     }
 
-    private int determinarNivelPorEI(double mediaEI) {
-        if (mediaEI >= 1.15) return 5;
-        if (mediaEI >= 1.10) return 4;
-        if (mediaEI >= 1.05) return 3;
-        if (mediaEI >= 1.00) return 2;
+    private int determinarNivelPorEI(double mediaEI, String gender, String goalCategory, int cenario) {
+        double[] cortes = obterCortesNivel(gender, goalCategory, cenario);
+        for (int i = cortes.length - 1; i >= 0; i--) {
+            if (mediaEI >= cortes[i]) {
+                return i + 2; // cortes[0] -> nÃ­vel 2, ..., cortes[10] -> nÃ­vel 12
+            }
+        }
         return 1;
+    }
+
+    private double[] obterCortesNivel(String gender, String goalCategory, int cenario) {
+        boolean isFemale = "FEMALE".equalsIgnoreCase(gender);
+        String goal = goalCategory != null ? goalCategory.trim().toUpperCase() : "ROUTINE_CONSISTENCY";
+
+        // Cortes mÃ­nimos de mediaEI para atingir os nÃ­veis 2 atÃ© 12 (nÃ­vel 1 Ã© o padrÃ£o abaixo de cortes[0])
+        if (isFemale && "ROUTINE_CONSISTENCY".equals(goal) && cenario == 1) {
+            return new double[]{0.98, 1.00, 1.02, 1.03, 1.04, 1.06, 1.07, 1.09, 1.10, 1.11, 1.13};
+        }
+        if (isFemale && "CARDIO_LONGEVITY".equals(goal) && cenario == 1) {
+            return new double[]{1.01, 1.03, 1.05, 1.07, 1.08, 1.10, 1.12, 1.13, 1.15, 1.17, 1.19};
+        }
+        if (isFemale && "HIGH_PERFORMANCE".equals(goal) && cenario == 1) {
+            return new double[]{1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.17, 1.19};
+        }
+        if (isFemale && cenario == 2) {
+            return new double[]{1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.17, 1.19};
+        }
+        // PadrÃ£o masculino / fallback alinhado Ã  escala 1.00 -> 1.20
+        return new double[]{1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20};
+    }
+
+    private double calcularMediaEIDosUltimos5Dias(
+            List<ActivitySummaryEntity> historicoCenario,
+            DayOfWeek diaDaSemana) {
+        if (historicoCenario == null || historicoCenario.isEmpty() || diaDaSemana == null) {
+            return 1.00;
+        }
+        List<ActivitySummaryEntity> ultimosDoDia = historicoCenario.stream()
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == diaDaSemana)
+                .limit(5)
+                .toList();
+
+        return ultimosDoDia.stream()
+                .filter(a -> a.getEfficiencyIndex() != null)
+                .mapToDouble(ActivitySummaryEntity::getEfficiencyIndex)
+                .average()
+                .orElse(1.00);
     }
 
     public String gerarPrescricaoSemanalIA(UserEntity user, List<ActivitySummaryEntity> treinosAnteriores) {
         LocalDate hoje = LocalDate.now(ZONE_SP);
-
-        LocalDate terca = hoje.with(DayOfWeek.TUESDAY);
-        LocalDate quinta = hoje.with(DayOfWeek.THURSDAY);
-        LocalDate sabado = hoje.with(DayOfWeek.SATURDAY);
-
-        boolean ehSemanaDaProva = sabado.equals(LocalDate.of(2026, 10, 31));
+        List<DayOfWeek> diasConfigurados = resolverDiasDeTreino(user.getTrainingDays());
+        Integer frequenciaSemanal = user.getWeeklyFrequency();
+        if (frequenciaSemanal != null && frequenciaSemanal > 0 && diasConfigurados.size() > frequenciaSemanal) {
+            diasConfigurados = diasConfigurados.subList(0, frequenciaSemanal);
+        }
+        List<DayOfWeek> diasSelecionados = diasConfigurados;
 
         List<ActivitySummaryEntity> listaTiros = activitySummaryRepository
                 .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 2);
         List<ActivitySummaryEntity> listaCenario1 = activitySummaryRepository
                 .findTop10ByUserIdAndDetectedScenarioOrderByStartDateDesc(user.getId(), 1);
 
-        List<ActivitySummaryEntity> ultimasTercas = listaCenario1.stream()
-                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
-                .limit(5).toList();
+        String gender = user.getGender() != null ? user.getGender().name() : "MALE";
+        String goalCategory = userGoalRepository
+                .findFirstByUserIdAndActiveTrueOrderByCreatedAtDesc(user.getId())
+                .map(g -> g.getCategory() != null ? g.getCategory().name() : "ROUTINE_CONSISTENCY")
+                .orElse("ROUTINE_CONSISTENCY");
 
-        List<ActivitySummaryEntity> ultimasQuintas = listaTiros.stream()
-                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.THURSDAY)
-                .limit(5).toList();
+        Map<DayOfWeek, Double> mediasEIPorDia = new LinkedHashMap<>();
+        Map<DayOfWeek, Integer> niveisPorDia = new LinkedHashMap<>();
 
-        List<ActivitySummaryEntity> ultimosSabados = listaCenario1.stream()
-                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
-                .limit(5).toList();
-
-        double mediaEI_Terca = ultimasTercas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
-        double mediaEI_Quinta = ultimasQuintas.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
-        double mediaEI_Sabado = ultimosSabados.stream().mapToDouble(ActivitySummaryEntity::getEfficiencyIndex).average().orElse(1.00);
-
-        int nivelTerca  = determinarNivelPorEI(mediaEI_Terca);
-        int nivelQuinta = determinarNivelPorEI(mediaEI_Quinta);
-        int nivelSabado = determinarNivelPorEI(mediaEI_Sabado);
+        for (int i = 0; i < diasConfigurados.size(); i++) {
+            DayOfWeek dia = diasConfigurados.get(i);
+            int cenarioDia = (i % 2 == 1) ? 2 : 1;
+            List<ActivitySummaryEntity> baseHistorico = (cenarioDia == 2) ? listaTiros : listaCenario1;
+            double mediaDia = calcularMediaEIDosUltimos5Dias(baseHistorico, dia);
+            int nivelDia = determinarNivelPorEI(mediaDia, gender, goalCategory, cenarioDia);
+            mediasEIPorDia.put(dia, mediaDia);
+            niveisPorDia.put(dia, nivelDia);
+        }
 
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
+        String fonteZonas = "EXAM".equalsIgnoreCase(user.getHrZoneSource())
+                ? "EXAME DE ERGOSPIROMETRIA (LV1/LV2)"
+                : "FÃ“RMULA DE FC (Karvonen / FC mÃ¡x e repouso)";
+
+        Optional<UserGoalEntity> objetivoAtivoOpt = userGoalRepository
+                .findFirstByUserIdAndActiveTrueOrderByCreatedAtDesc(user.getId());
+        UserGoalEntity objetivoAtivo = objetivoAtivoOpt.orElse(null);
+        String styleContextMongo = userGoalService.getActiveStyleContext(user);
+
+        Integer idade = null;
+        if (user.getBirthDate() != null) {
+            idade = Period.between(user.getBirthDate(), hoje).getYears();
+        }
 
         StringBuilder sb = new StringBuilder();
         sb.append("VOCÃŠ Ã‰ O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
@@ -3804,14 +4645,77 @@ public class WeeklyPlannerService {
             sb.append("\n");
         }
 
-        sb.append("--- DIRETRIZES DE CENÃRIO E NÃVEIS OBRIGATÃ“RIOS DO SISTEMA ---\n");
-        sb.append("1. TERÃ‡A-FEIRA (").append(terca).append("): Prescrever CENÃRIO 1 no NÃVEL ").append(nivelTerca).append(" (Rodagem Leve / Z2 - FATMAX).\n");
-        sb.append("2. QUINTA-FEIRA (").append(quinta).append("): Prescrever CENÃRIO 2 no NÃVEL ").append(nivelQuinta).append(" (IntensificaÃ§Ã£o / Tiros / VO2mÃ¡x).\n");
+        sb.append("--- PERFIL FISIOLÃ“GICO E ZONAS DO ATLETA ---\n");
+        sb.append("- GÃªnero: ").append(gender).append("\n");
+        sb.append("- Origem das Zonas CardÃ­acas: ").append(fonteZonas).append("\n");
+        if (idade != null) {
+            sb.append("- Idade: ").append(idade).append(" anos\n");
+        }
+        if (user.getHrMax() != null) {
+            sb.append("- FC MÃ¡xima: ").append(user.getHrMax()).append(" bpm\n");
+        }
+        if (user.getHrResting() != null) {
+            sb.append("- FC de Repouso: ").append(user.getHrResting()).append(" bpm\n");
+        }
+        if ("EXAM".equalsIgnoreCase(user.getHrZoneSource()) && user.getZ2MaxBpm() != null && user.getZ4MaxBpm() != null) {
+            sb.append("- Limiares de ReferÃªncia (Z2 MÃ¡x / LV1 e Z4 MÃ¡x / LV2): ")
+                    .append(user.getZ2MaxBpm()).append(" bpm / ").append(user.getZ4MaxBpm()).append(" bpm\n");
+        }
+        sb.append("\n");
 
-        if (ehSemanaDaProva) {
-            sb.append("3. SÃBADO (").append(sabado).append("): GATILHO DE PROVA ATIVADO (31/10/2026). MEIA MARATONA OFICIAL (21.1 km).\n\n");
+        sb.append("--- OBJETIVO ATIVO E DIRETRIZ DE ESTILO DO ATLETA ---\n");
+        if (objetivoAtivo != null) {
+            sb.append("- Categoria do Objetivo: ").append(objetivoAtivo.getCategory());
+            if (objetivoAtivo.getCategory() != null) {
+                sb.append(" (").append(objetivoAtivo.getCategory().getLabel()).append(")");
+            }
+            sb.append("\n");
+            sb.append("- CÃ³digo de Estilo de Treino: ").append(objetivoAtivo.getTrainingStyleCode()).append("\n");
+            if (objetivoAtivo.getEvent() != null) {
+                sb.append("- Evento/Prova Vinculada: ").append(objetivoAtivo.getEvent().getEventName())
+                        .append(" | Data: ").append(objetivoAtivo.getEvent().getEventDate())
+                        .append(" | DistÃ¢ncia Alvo: ").append(objetivoAtivo.getEvent().getTargetDistanceKm()).append(" km\n");
+            }
         } else {
-            sb.append("3. SÃBADO (").append(sabado).append("): Prescrever CENÃRIO 1 no NÃVEL ").append(nivelSabado).append(" (LongÃ£o / Rodagem de Base - Zona 2).\n\n");
+            sb.append("- Objetivo Ativo: NÃ£o definido (usar rotina/consistÃªncia padrÃ£o).\n");
+        }
+        sb.append("- FrequÃªncia Semanal Configurada: ").append(user.getWeeklyFrequency()).append(" dias\n");
+        sb.append("- Dias de Treino Configurados: ").append(user.getTrainingDays()).append("\n");
+        if (styleContextMongo != null && !styleContextMongo.isBlank()) {
+            sb.append("- Diretriz do Estilo no MongoDB:\n").append(styleContextMongo).append("\n");
+        }
+        sb.append("\n");
+
+        sb.append("--- DIRETRIZES DE CENÃRIO E NÃVEIS OBRIGATÃ“RIOS DO SISTEMA ---\n");
+        for (int i = 0; i < diasConfigurados.size(); i++) {
+            DayOfWeek dia = diasConfigurados.get(i);
+            LocalDate dataDia = hoje.with(java.time.temporal.TemporalAdjusters.nextOrSame(dia));
+            int cenarioDia = (i % 2 == 1) ? 2 : 1;
+            int nivelDia = niveisPorDia.getOrDefault(dia, 1);
+            double mediaDia = mediasEIPorDia.getOrDefault(dia, 1.00);
+            String descCenario = (cenarioDia == 2)
+                    ? "CENÃRIO 2 (IntensificaÃ§Ã£o / Tiros / VO2mÃ¡x)"
+                    : "CENÃRIO 1 (Rodagem Leve / Base AerÃ³bica / Z2)";
+            sb.append((i + 1)).append(". ").append(dia).append(" (").append(dataDia)
+                    .append("): Prescrever ").append(descCenario)
+                    .append(" no NÃVEL ").append(nivelDia)
+                    .append(String.format(" (MÃ©dia EI Ãºltimos 5 treinos do dia: %.3f).\n", mediaDia));
+        }
+        sb.append("\n");
+
+        sb.append("--- DIAS DE TREINO SELECIONADOS PELO ATLETA ---\n");
+        for (DayOfWeek dia : diasSelecionados) {
+            LocalDate dataDia = hoje.with(dia);
+            sb.append("- ").append(dia).append(" (").append(dataDia).append(")\n");
+        }
+        sb.append("INSTRUÃ‡ÃƒO DE DIAS: Gere um bloco <prescription> com <scheduled_date> correspondente a cada dia listado acima (respeitando a quantidade e os dias escolhidos pelo atleta, com o nÃ­vel adequado ao estÃ­mulo de cada sessÃ£o).\n\n");
+
+        if (user.getWeeklyFrequency() != null) {
+            sb.append("LIMITE DE FREQUÃŠNCIA DO ATLETA: O atleta informou disponibilidade mÃ¡xima de ")
+                    .append(user.getWeeklyFrequency())
+                    .append(" treino(s) nesta semana. NÃ£o prescreva mais do que ")
+                    .append(user.getWeeklyFrequency())
+                    .append(" sessÃ£o(Ãµes) na semana e ajuste a distribuiÃ§Ã£o/carga para caber nesse limite com seguranÃ§a.\n\n");
         }
 
         sb.append("FORMATO DE SAÃDA EXIGIDO:\n");
@@ -3820,119 +4724,30 @@ public class WeeklyPlannerService {
 
         sb.append("  <weekly_overview>[FaÃ§a um breve balanÃ§o de 3 a 5 linhas analisando a consistÃªncia, eficiÃªncia e volume do atleta na semana anterior baseado nos treinos do MySQL.]</weekly_overview>\n\n");
 
-        sb.append("  <prescription>\n");
-        sb.append("    <scheduled_date>").append(terca).append("</scheduled_date>\n");
-        sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
-        sb.append("    <distance_km>[DistÃ¢ncia conforme MongoDB ex: 10.0]</distance_km>\n");
-        sb.append("    <duration>[DuraÃ§Ã£o em minutos conforme MongoDB]</duration>\n");
-        sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
-        sb.append("    <focus>[Foco tÃ©cnico do nÃ­vel no MongoDB]</focus>\n");
-        sb.append("    <method>[DescriÃ§Ã£o detalhada do mÃ©todo conforme MongoDB]</method>\n");
-        sb.append("    <justification>[Justificativa fisiolÃ³gica da escolha]</justification>\n");
-        sb.append("    <target_scenario>1</target_scenario>\n");
-        sb.append("    <target_level>").append(nivelTerca).append("</target_level>\n");
-        sb.append("  </prescription>\n");
+        for (int i = 0; i < diasConfigurados.size(); i++) {
+            DayOfWeek dia = diasConfigurados.get(i);
+            LocalDate dataDia = hoje.with(dia);
+            int cenarioDia = (i % 2 == 1) ? 2 : 1;
+            int nivelDia = niveisPorDia.getOrDefault(dia, 1);
 
-        sb.append("  <prescription>\n");
-        sb.append("    <scheduled_date>").append(quinta).append("</scheduled_date>\n");
-        sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
-        sb.append("    <distance_km>[DistÃ¢ncia conforme MongoDB ex: 7.8]</distance_km>\n");
-        sb.append("    <duration>[DuraÃ§Ã£o em minutos conforme MongoDB]</duration>\n");
-        sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
-        sb.append("    <focus>[Foco tÃ©cnico do nÃ­vel no MongoDB]</focus>\n");
-        sb.append("    <method>[FaÃ§a o detalhamento de SÃ©ries de forma amigÃ¡vel com o atleta sem muita formalidade,especifique os Tiros, Pausas e Zonas conforme MongoDB]</method>\n");
-        sb.append("    <justification>[Justificativa fisiolÃ³gica da escolha dos tiros]</justification>\n");
-        sb.append("    <target_scenario>2</target_scenario>\n");
-        sb.append("    <target_level>").append(nivelQuinta).append("</target_level>\n");
-        sb.append("  </prescription>\n");
-
-        if (ehSemanaDaProva) {
             sb.append("  <prescription>\n");
-            sb.append("    <scheduled_date>").append(sabado).append("</scheduled_date>\n");
-            sb.append("    <type>PROVA OFICIAL - MEIA MARATONA (21.1 KM)</type>\n");
-            sb.append("    <distance_km>21.1</distance_km>\n");
-            sb.append("    <duration>130 a 135 minutos (2h10min a 2h15min)</duration>\n");
-            sb.append("    <intensity>GestÃ£o Z2 no inÃ­cio (125-139 bpm) progredindo para Z3/Z4 sustentado nos km finais</intensity>\n");
-            sb.append("    <focus>ExecuÃ§Ã£o do plano de prova de 21.1 km. Controle rigoroso de pacing, hidrataÃ§Ã£o constante, gestÃ£o de altimetria nas pontes/viadutos e reserva funcional para os km 15 a 21.</focus>\n");
-            sb.append("    <method>FASE 1 â€” KM 0 AO KM 3\n");
-            sb.append("OBJETIVO DO TRECHO\nAclimaÃ§Ã£o, adaptaÃ§Ã£o Ã s condiÃ§Ãµes ambientais, controle de ansiedade e acomodaÃ§Ã£o no pelotÃ£o em Z2 pura.\n");
-            sb.append("PACE PLANEJADO\nFaixa de 6:25 a 6:35 min/km. Priorize estabilizar a passada em ritmo confortÃ¡vel sem acelerar para compensar a largada.\n");
-            sb.append("FREQUÃŠNCIA CARDÃACA\nZ2 (125 a 139 bpm). Caso a FC ultrapasse 139 bpm por ansiedade, reduza levemente a passada atÃ© a estabilizaÃ§Ã£o.\n");
-            sb.append("PREPARAÃ‡ÃƒO PARA A ALTIMETRIA\nTrecho inicial plano de asfalto urbano. Aproveite a ausÃªncia de aclives para estabelecer cadÃªncia estÃ¡vel.\n");
-            sb.append("NUTRIÃ‡ÃƒO E HIDRATAÃ‡ÃƒO\nHidrataÃ§Ã£o preventiva nos postos com pequenos goles de Ã¡gua pura (100-150 ml) sem interromper a passada.\n");
-            sb.append("CRITÃ‰RIO PARA A PRÃ“XIMA FASE\nFC estabilizada em Z2, respiraÃ§Ã£o ritmada e sensaÃ§Ã£o de esforÃ§o leve a moderado.\n\n");
-
-            sb.append("FASE 2 â€” KM 3 AO KM 6\n");
-            sb.append("OBJETIVO DO TRECHO\nManutenÃ§Ã£o do ritmo de base aerÃ³bica em Z2 e gestÃ£o consciente do primeiro acidente altimÃ©trico do percurso.\n");
-            sb.append("PACE PLANEJADO\nFaixa de 6:15 a 6:25 min/km no plano. Aceite perda momentÃ¢nea de velocidade na subida para preservar glicogÃªnio.\n");
-            sb.append("FREQUÃŠNCIA CARDÃACA\nZ2 (125 a 139 bpm). Gerencie o esforÃ§o pela FC durante o aclive para evitar picos precoces de acidose.\n");
-            sb.append("PREPARAÃ‡ÃƒO PARA A ALTIMETRIA\nSubida da Ponte Rio Poxim no Km 5.2 (+9.7m de elevaÃ§Ã£o). Encurte a passada, aumente a cadÃªncia e use a descida para soltar as pernas.\n");
-            sb.append("NUTRIÃ‡ÃƒO E HIDRATAÃ‡ÃƒO\nConsumo do 1Âº Gel de Carboidrato (20g CHO) no Km 6, obrigatoriamente acompanhado de 150-200 ml de Ã¡gua no posto de hidrataÃ§Ã£o.\n");
-            sb.append("CRITÃ‰RIO PARA A PRÃ“XIMA FASE\nRecuperaÃ§Ã£o completa da FC para Z2 apÃ³s a descida da ponte e tolerÃ¢ncia gastrointestinal perfeita ao gel.\n\n");
-
-            sb.append("FASE 3 â€” KM 6 AO KM 9\n");
-            sb.append("OBJETIVO DO TRECHO\nEstabilizaÃ§Ã£o no ritmo alvo de cruzeiro na Av. Beira Mar, consolidando a eficiÃªncia metabÃ³lica em Z2.\n");
-            sb.append("PACE PLANEJADO\nFaixa de 6:10 a 6:20 min/km. Mantenha a regularidade do ritmo aproveitando a topografia favorÃ¡vel.\n");
-            sb.append("FREQUÃŠNCIA CARDÃACA\nZ2 (125 a 139 bpm). Se a FC indicar elevaÃ§Ã£o contÃ­nua sem ganho de velocidade, reduza 5 segundos no pace.\n");
-            sb.append("PREPARAÃ‡ÃƒO PARA A ALTIMETRIA\nTrecho totalmente plano da Av. Beira Mar. Foco na postura, relaxamento dos ombros e economia de corrida.\n");
-            sb.append("NUTRIÃ‡ÃƒO E HIDRATAÃ‡ÃƒO\nManutenÃ§Ã£o da hidrataÃ§Ã£o com Ã¡gua nos postos disponÃ­veis a cada 2 km ou 3 km conforme necessidade tÃ©rmica.\n");
-            sb.append("CRITÃ‰RIO PARA A PRÃ“XIMA FASE\nAusÃªncia de desacoplamento cardiovascular relevante e bom acoplamento neuromuscular mantido.\n\n");
-
-            sb.append("FASE 4 â€” KM 9 AO KM 12\n");
-            sb.append("OBJETIVO DO TRECHO\nTransiÃ§Ã£o gradual para Z3, administrando as variaÃ§Ãµes altimÃ©tricas da regiÃ£o da FarolÃ¢ndia sem comprometer o final.\n");
-            sb.append("PACE PLANEJADO\nFaixa de 6:05 a 6:15 min/km. Ajuste o esforÃ§o nos aclives e busque regularidade imediata no plano.\n");
-            sb.append("FREQUÃŠNCIA CARDÃACA\nTransiÃ§Ã£o Z2 para Z3 (138 a 145 bpm). Monitore a resposta tensional antes de autorizar aumento do ritmo.\n");
-            sb.append("PREPARAÃ‡ÃƒO PARA A ALTIMETRIA\nRetorno da FarolÃ¢ndia (+8.8m no Km 9.6) e Viaduto Maria do Carmo (+8.8m no Km 11.5). Controle a amplitude de passada na subida.\n");
-            sb.append("NUTRIÃ‡ÃƒO E HIDRATAÃ‡ÃƒO\nGoles curtos de Ã¡gua nos postos para manter o equilÃ­brio hÃ­drico e preencher o estÃ´mago antes do segundo gel.\n");
-            sb.append("CRITÃ‰RIO PARA A PRÃ“XIMA FASE\nCapacidade sustentada de manter o ritmo em Z3 sem sensaÃ§Ã£o de estafa muscular precoce.\n\n");
-
-            sb.append("FASE 5 â€” KM 12 AO KM 15\n");
-            sb.append("OBJETIVO DO TRECHO\nSustentaÃ§Ã£o de ritmo firme em Z3 e superaÃ§Ã£o do trecho crÃ­tico do percurso com estratÃ©gia nutricional alinhada.\n");
-            sb.append("PACE PLANEJADO\nFaixa de 6:00 a 6:10 min/km. Progrida o ritmo com seguranÃ§a caso a resposta metabÃ³lica permaneÃ§a positiva.\n");
-            sb.append("FREQUÃŠNCIA CARDÃACA\nZ3 (140 a 152 bpm). Aceite a subida da FC compatÃ­vel com a intensidade, evitando ultrapassar 155 bpm nesta fase.\n");
-            sb.append("PREPARAÃ‡ÃƒO PARA A ALTIMETRIA\nPonte Godofredo Diniz (+10.5m de elevaÃ§Ã£o no Km 14.7) seguida do plano do Parque da Sementeira / Riomar.\n");
-            sb.append("NUTRIÃ‡ÃƒO E HIDRATAÃ‡ÃƒO\nConsumo do 2Âº Gel de Carboidrato (20g CHO) no Km 13 no plano, acompanhado obrigatoriamente por 150-200 ml de Ã¡gua pura.\n");
-            sb.append("CRITÃ‰RIO PARA A PRÃ“XIMA FASE\nAbsorÃ§Ã£o adequada dos carboidratos e estabilidade muscular para iniciar a progressÃ£o final de prova.\n\n");
-
-            sb.append("FASE 6 â€” KM 15 AO KM 18\n");
-            sb.append("OBJETIVO DO TRECHO\nIntensificaÃ§Ã£o em Z3 Superior na Av. Delmiro Gouveia, aplicando o Negative Split caso haja reserva funcional suficiente.\n");
-            sb.append("PACE PLANEJADO\nFaixa de 5:55 a 6:05 min/km. AceleraÃ§Ã£o progressiva e consciente sustentada no plano.\n");
-            sb.append("FREQUÃŠNCIA CARDÃACA\nZ3 Superior (148 a 155 bpm). Se houver sinais de fadiga excessiva ou dor, mantenha um esforÃ§o sustentÃ¡vel em Z3.\n");
-            sb.append("PREPARAÃ‡ÃƒO PARA A ALTIMETRIA\nPlano contÃ­nuo na Av. Delmiro Gouveia. Terreno ideal para imprimir ritmo constante de velocidade.\n");
-            sb.append("NUTRIÃ‡ÃƒO E HIDRATAÃ‡ÃƒO\nHidrataÃ§Ã£o de apoio com Ã¡gua para enxÃ¡gue bucal e conforto tÃ©rmico nos pontos de suporte.\n");
-            sb.append("CRITÃ‰RIO PARA A PRÃ“XIMA FASE\nFoco mental elevado, ausÃªncia de cÃ£ibras e margem cardiovascular para o ataque final na Orla.\n\n");
-
-            sb.append("FASE 7 â€” KM 18 ATÃ‰ A CHEGADA, NO KM 21,097\n");
-            sb.append("OBJETIVO DO TRECHO\nAproveitamento da supercompensaÃ§Ã£o do polimento na Orla de Atalaia, acelerando com seguranÃ§a atÃ© o pÃ³rtico de chegada.\n");
-            sb.append("PACE PLANEJADO\nAbaixo de 5:55 min/km no trecho geral, com 100 metros finais livres de sprint para a linha de chegada.\n");
-            sb.append("FREQUÃŠNCIA CARDÃACA\nZ3 Superior / Z4 sustentado (155 a 165+ bpm). AceleraÃ§Ã£o sujeita ao estado muscular e cardiovascular real do atleta.\n");
-            sb.append("PREPARAÃ‡ÃƒO PARA A ALTIMETRIA\nTrecho plano da Orla de Atalaia atÃ© a reta final de chegada. Ventos laterais moderados podem exigir foco na postura.\n");
-            sb.append("NUTRIÃ‡ÃƒO E HIDRATAÃ‡ÃƒO\nGoles pontuais de Ã¡gua se necessÃ¡rio para alÃ­vio do ressecamento bucal nos quilÃ´metros finais.\n");
-            sb.append("CRITÃ‰RIO PARA A PRÃ“XIMA FASE\nConclusÃ£o oficial dos 21,097 km da prova com travessia segura da linha de chegada e desaceleraÃ§Ã£o gradual.</method>\n");
-            sb.append("    <justification>PrescriÃ§Ã£o oficial da prova alvo ajustada pela capacidade de endurance, perfil de altimetria e pela mÃ©dia histÃ³rica de eficiÃªncia recuperada do MySQL.</justification>\n");
-            sb.append("    <target_scenario>1</target_scenario>\n");
-            sb.append("    <target_level>5</target_level>\n");
-            sb.append("  </prescription>\n");
-        } else {
-            sb.append("  <prescription>\n");
-            sb.append("    <scheduled_date>").append(sabado).append("</scheduled_date>\n");
+            sb.append("    <scheduled_date>").append(dataDia).append("</scheduled_date>\n");
             sb.append("    <type>[Tipo do treino conforme MongoDB]</type>\n");
-            sb.append("    <distance_km>[DistÃ¢ncia conforme MongoDB ex: 16.0]</distance_km>\n");
+            sb.append("    <distance_km>[DistÃ¢ncia conforme MongoDB ex: 10.0]</distance_km>\n");
             sb.append("    <duration>[DuraÃ§Ã£o em minutos conforme MongoDB]</duration>\n");
             sb.append("    <intensity>[Faixas de FC e Zonas conforme MongoDB]</intensity>\n");
             sb.append("    <focus>[Foco tÃ©cnico do nÃ­vel no MongoDB]</focus>\n");
-            sb.append("    <method>[DescriÃ§Ã£o detalhada do mÃ©todo do LongÃ£o conforme MongoDB]</method>\n");
-            sb.append("    <justification>[Justificativa fisiolÃ³gica do volume]</justification>\n");
-            sb.append("    <target_scenario>1</target_scenario>\n");
-            sb.append("    <target_level>").append(nivelSabado).append("</target_level>\n");
-            sb.append("  </prescription>\n");
+            sb.append("    <method>[DescriÃ§Ã£o detalhada do mÃ©todo conforme MongoDB]</method>\n");
+            sb.append("    <justification>[Justificativa fisiolÃ³gica da escolha]</justification>\n");
+            sb.append("    <target_scenario>").append(cenarioDia).append("</target_scenario>\n");
+            sb.append("    <target_level>").append(nivelDia).append("</target_level>\n");
+            sb.append("  </prescription>\n\n");
         }
 
-        // ðŸŽ¯ OBRIGATÃ“RIO: NÃ“ DE CONCLUSÃƒO E MOTIVAÃ‡ÃƒO
         sb.append("  <weekly_conclusion>")
                 .append("Escreva um texto motivador de 3 a 5 linhas parabenizando o atleta ")
                 .append(user.getName())
-                .append(" pela dedicaÃ§Ã£o contÃ­nua no ciclo de treinos, fazendo um breve resumo da sua prontidÃ£o para a Meia Maratona e desejando excelente prova com muita energia e foco!")
+                .append(" pela dedicaÃ§Ã£o contÃ­nua e incentivando a consistÃªncia na nova semana de treinos.")
                 .append("</weekly_conclusion>\n");
 
         sb.append("</weekly_prescription>\n");
@@ -3994,7 +4809,6 @@ public class WeeklyPlannerService {
             String methodCompleto = "";
             if (rawMethod != null && !rawMethod.isBlank()) {
                 methodCompleto = rawMethod.replaceAll("[*#`]", "").trim();
-                // FormataÃ§Ã£o defensiva caso o mÃ©todo venha em parÃ¡grafo Ãºnico sem quebra
                 methodCompleto = methodCompleto.replaceAll("(?i)(FASE \\d+ â€”)", "\n\n$1").trim();
             }
 
@@ -4026,7 +4840,6 @@ public class WeeklyPlannerService {
                     .append("------------------------------------\n\n");
         }
 
-        // ðŸŽ¯ EXTRAÃ‡ÃƒO E ANEXO DO BLOCO FINAL DE MOTIVAÃ‡ÃƒO E CONCLUSÃƒO
         String conclusion = extractTagValue(rawXml, "weekly_conclusion");
         if (conclusion != null && !conclusion.isBlank()) {
             msgTelegram.append("ðŸš€ CONCLUSÃƒO E MOTIVAÃ‡ÃƒO:\n")
@@ -4051,6 +4864,31 @@ public class WeeklyPlannerService {
     private String sanitizeText(String text) {
         if (text == null) return "";
         return text.replaceAll("[*#`]", "").trim();
+    }
+
+    private List<DayOfWeek> resolverDiasDeTreino(String trainingDaysStr) {
+        if (trainingDaysStr == null || trainingDaysStr.isBlank()) {
+            return List.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
+        }
+        List<DayOfWeek> dias = Arrays.stream(trainingDaysStr.split(","))
+                .map(String::trim)
+                .map(String::toUpperCase)
+                .map(dia -> switch (dia) {
+                    case "SEGUNDA", "SEGUNDA-FEIRA", "MONDAY" -> DayOfWeek.MONDAY;
+                    case "TERÃ‡A", "TERCA", "TERÃ‡A-FEIRA", "TERCA-FEIRA", "TUESDAY" -> DayOfWeek.TUESDAY;
+                    case "QUARTA", "QUARTA-FEIRA", "WEDNESDAY" -> DayOfWeek.WEDNESDAY;
+                    case "QUINTA", "QUINTA-FEIRA", "THURSDAY" -> DayOfWeek.THURSDAY;
+                    case "SEXTA", "SEXTA-FEIRA", "FRIDAY" -> DayOfWeek.FRIDAY;
+                    case "SÃBADO", "SABADO", "SATURDAY" -> DayOfWeek.SATURDAY;
+                    case "DOMINGO", "SUNDAY" -> DayOfWeek.SUNDAY;
+                    default -> DayOfWeek.valueOf(dia);
+                })
+                .distinct()
+                .sorted(Comparator.comparingInt(DayOfWeek::getValue))
+                .toList();
+        return dias.isEmpty()
+                ? List.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY)
+                : dias;
     }
 }
 

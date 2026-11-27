@@ -72,4 +72,14 @@ public class UserGoalService {
         String genderStr = (user.getGender() != null) ? user.getGender().name() : null;
         return trainingStyleService.resolveStyleContext(styleCode, genderStr);
     }
+    public int recommendWeeklyFrequency(GoalCategory category) {
+        if (category == null) {
+            return 3;
+        }
+        return switch (category) {
+            case ROUTINE_CONSISTENCY -> 3;
+            case CARDIO_LONGEVITY -> 3;
+            case HIGH_PERFORMANCE -> 4;
+        };
+    }
 }

@@ -2,10 +2,7 @@ package jackson.stravafit.service;
 
 import jackson.stravafit.client.GeminiClient;
 import jackson.stravafit.model.*;
-import jackson.stravafit.repository.ActivityRepository;
-import jackson.stravafit.repository.ActivitySummaryRepository;
-import jackson.stravafit.repository.UserRepository;
-import jackson.stravafit.repository.WorkoutPrescriptionRepository;
+import jackson.stravafit.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +43,8 @@ public class InsightService {
     private final KnowledgeService knowledgeService;
     private final InsightService self;
     private final OpenMeteoService openMeteoService;
+    private final UserGoalRepository userGoalRepository;
+    private final UserGoalService userGoalService;
 
     private static final ZoneId ZONE_SP = ZoneId.of("America/Sao_Paulo");
     private static final DateTimeFormatter BRAZIL_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
@@ -59,7 +58,9 @@ public class InsightService {
                           UserRepository userRepository,
                           ActivityService activityService,
                           @Lazy InsightService self,
-                          KnowledgeService knowledgeService, OpenMeteoService openMeteoService) {
+                          KnowledgeService knowledgeService, OpenMeteoService openMeteoService,
+                          UserGoalRepository userGoalRepository,
+                          UserGoalService userGoalService) {
         this.geminiClient = geminiClient;
         this.activityRepository = activityRepository;
         this.workoutPrescriptionRepository = workoutPrescriptionRepository;
@@ -69,6 +70,8 @@ public class InsightService {
         this.self = self;
         this.knowledgeService = knowledgeService;
         this.openMeteoService = openMeteoService;
+        this.userGoalRepository = userGoalRepository;
+        this.userGoalService = userGoalService;
     }
 
     public record ClassificacaoResultado(String tipoEstimulo, int janelasInstaveis) {
@@ -121,7 +124,10 @@ public class InsightService {
         return insightDaIA;
     }
 
-    private String generateInsight(UserEntity user, Long activityId, String name, Double distance, String dateStr, Double averageSpeed, List<StravaActivity.MinuteAnalysis> analysis, StravaActivity activity, String climaHeader) {
+    private String generateInsight(UserEntity user, Long activityId, String name, Double distance,
+                                   String dateStr, Double averageSpeed,
+                                   List<StravaActivity.MinuteAnalysis> analysis,
+                                   StravaActivity activity, String climaHeader) {
 
         // 1. Primeiro calculamos as métricas essenciais e as datas baseadas nas preferências do atleta
         ZonedDateTime activityDate = parseToZonedDateTime(dateStr);
@@ -131,6 +137,11 @@ public class InsightService {
         Optional<WorkoutPrescriptionEntity> prescricaoAnterior =
                 workoutPrescriptionRepository.findTopByUserIdAndScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(
                         user.getId(), activityDate.toLocalDate());
+        Optional<UserGoalEntity> objetivoAtivoOpt = userGoalRepository
+                .findFirstByUserIdAndActiveTrueOrderByCreatedAtDesc(user.getId());
+        String styleContextMongo = userGoalService.getActiveStyleContext(user);
+
+
         // 2. Classificamos o estímulo para saber qual cenário a sessão atual pertence
         ClassificacaoResultado resultado = classificarEstimuloFisiologico(analysis, metrics.stdDev(), metrics.fcMax(), metrics.fcMedia());
         String tipoEstimuloReal = resultado.tipoEstimulo();
@@ -166,10 +177,9 @@ public class InsightService {
                 .filter(a -> a.getActivityId() == null || !a.getActivityId().equals(activityId))
                 .collect(Collectors.toList());
 
-        // Busca no MySQL a prescrição agendada para o próximo treino (Terça, Quinta ou Sábado)
         LocalDate dataProximo = parseNextWorkoutDate(proximoTreinoData);
         // Garantir que o tipo retornado seja Optional
-        // Garanta que NÃO haja .orElse(null) no final desta linha:
+
         Optional<WorkoutPrescriptionEntity> proximaPrescricao =
                 workoutPrescriptionRepository.findByUserIdAndScheduledDate(user.getId(), dataProximo);
 
@@ -192,18 +202,24 @@ public class InsightService {
             listaCenario1.sort(Comparator.comparing(ActivitySummaryEntity::getStartDate).reversed());
         }
 
-        // 6. Separação precisa por dia da semana na memória
-        List<ActivitySummaryEntity> listaTercas = listaCenario1.stream()
-                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.TUESDAY)
+        List<DayOfWeek> diasOrdenados = (diasConfigurados != null && !diasConfigurados.isEmpty())
+                ? diasConfigurados.stream().sorted(Comparator.comparingInt(DayOfWeek::getValue)).toList()
+                : List.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
+
+        DayOfWeek diaBaseCurto = diasOrdenados.get(0);
+        DayOfWeek diaBaseLongo = diasOrdenados.get(diasOrdenados.size() - 1);
+
+        List<ActivitySummaryEntity> listaBaseCurta = listaCenario1.stream()
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == diaBaseCurto)
                 .toList();
 
-        List<ActivitySummaryEntity> listaSabados = listaCenario1.stream()
-                .filter(a -> a.getStartDate().getDayOfWeek() == DayOfWeek.SATURDAY)
+        List<ActivitySummaryEntity> listaBaseLonga = listaCenario1.stream()
+                .filter(a -> a.getStartDate() != null && a.getStartDate().getDayOfWeek() == diaBaseLongo)
                 .toList();
 
-        // 7. Cálculo das médias de eficiência incluindo o treino de hoje
-        double mediaEficienciaZ2Curto = calcularMediaEficienciaDaLista(listaTercas, 5);
-        double mediaEficienciaZ2Longo = calcularMediaEficienciaDaLista(listaSabados, 5);
+        // 7. Cálculo das médias de eficiência incluindo o treino do dia
+        double mediaEficienciaZ2Curto = calcularMediaEficienciaDaLista(listaBaseCurta, 5);
+        double mediaEficienciaZ2Longo = calcularMediaEficienciaDaLista(listaBaseLonga, 5);
         double mediaEficienciaTiros = calcularMediaEficienciaDaLista(listaTiros, 5);
 
         // 8. Busca no MySQL a prescrição agendada para a data do treino de hoje
@@ -265,7 +281,8 @@ public class InsightService {
                 mediaEficienciaZ2Curto,
                 mediaEficienciaZ2Longo,
                 historicoPerformanceGlobal,
-                climaHeader
+                climaHeader, objetivoAtivoOpt.orElse(null),
+                styleContextMongo
         );
 
         String rawAiResponse = geminiClient.getInsight(prompt);
@@ -373,7 +390,8 @@ public class InsightService {
                                            double mediaEficienciaZ2Curto,
                                            double mediaEficienciaZ2Longo,
                                            String historicoPerformanceGlobal,
-                                           String climaHeader) {
+                                           String climaHeader, UserGoalEntity objetivoAtivo,
+                                           String styleContextMongo) {
         String dataFormatada = date.format(BRAZIL_FORMATTER);
         String scientificContext = knowledgeService.getScientificContext(user.getGender());
         List<ActivityEntity> historico = activityRepository.findTop10ByUserIdOrderByStartDateDesc(user.getId());
@@ -381,7 +399,12 @@ public class InsightService {
         int hrMax = user.getHrMax();
         int hrRest = user.getHrResting();
         String nomeAtletaReal = (user.getName() != null && !user.getName().isBlank()) ? user.getName() : "Atleta";
-        boolean proximoEhSabado = proximoTreinoData.toUpperCase().contains("SÁBADO") || proximoTreinoData.toUpperCase().contains("SATURDAY");
+        List<DayOfWeek> diasAtletaOrdenados = parseTrainingDays(user.getTrainingDays()).stream()
+                .sorted(Comparator.comparingInt(DayOfWeek::getValue))
+                .toList();
+        String resumoDiasAtleta = diasAtletaOrdenados.stream()
+                .map(DayOfWeek::name)
+                .collect(Collectors.joining(", "));
 
         double histVo2Medio = historico.stream().mapToDouble(a -> 15.3 * ((a.getMaxHeartRate() != null ? a.getMaxHeartRate() : hrMax) / (double) hrRest)).average().orElse(0.0);
         double histFcMaxMedia = historico.stream().mapToDouble(a -> a.getMaxHeartRate() != null ? a.getMaxHeartRate() : 0).average().orElse(0.0);
@@ -391,15 +414,7 @@ public class InsightService {
 
         StringBuilder sb = new StringBuilder();
 
-        // Data Fixa da Prova Alvo (Meia Maratona 2026)
-        LocalDate dataProvaAlvo = LocalDate.of(2026, 10, 31);
         LocalDate dataTreinoAtual = date.toLocalDate();
-        boolean ehDiaDaProvaAlvo = dataTreinoAtual.equals(dataProvaAlvo);
-
-        // Cálculo de dias e semanas restantes
-        long diasRestantes = java.time.temporal.ChronoUnit.DAYS.between(dataTreinoAtual, dataProvaAlvo);
-        long semanasRestantes = (diasRestantes > 0) ? (diasRestantes / 7) + 1 : 0;
-
 
         sb.append("VOCÊ É O FISIOLOGISTA E TREINADOR CHEFE DO PROJETO STRAVAFIT.\n");
         sb.append("SUA MISSÃO É ANALISAR O TREINO ATUAL, EMITIR UM DIAGNÓSTICO FISIOLÓGICO, PRESCREVER A RECUPERAÇÃO E GERAR O PRÓXIMO TREINO.\n\n");
@@ -415,14 +430,10 @@ public class InsightService {
 
         sb.append("✅ JEITO CERTO (Natural, parceiro e descontraído):\n");
         sb.append("  'Fala, ").append(nomeAtletaReal).append("! Beleza? Cara, que treino sensacional você entregou hoje! Fechar os 10.1 km cravando 95% do tempo na Zona 2 mostra um controle de ritmo absurdo.\n");
-        sb.append("  Seu Efficiency Index bateu 1.117, o que é uma marca excelente. Na prática, seu corpo tá ficando cada vez mais eficiente em queimar gordura como combustível (massa demais pra preparação da Meia Maratona!). O coração trabalhou super estável, mesmo com essa garoa e umidade alta...'\n\n");
+        sb.append("  Seu Efficiency Index bateu 1.117, o que é uma marca excelente. Na prática, seu corpo tá ficando cada vez mais eficiente em queimar gordura como combustível. O coração trabalhou super estável, mesmo com essa garoa e umidade alta...'\n\n");
 
         sb.append("REGRA DE FORMATAÇÃO: GERE A RESPOSTA USANDO APENAS TEXTO PURO, TÍTULOS EM MAIÚSCULAS E QUEBRAS DE LINHA. É ESTRITAMENTE PROIBIDO O USO DE MARKDOWN.\n\n");
         sb.append("--- CONDIÇÕES CLIMÁTICAS NO MOMENTO DO TREINO ---\n");
-
-        if (ehDiaDaProvaAlvo) {
-            sb.append("🚨 ATENÇÃO IA - DIRETRIZ ESPECIAL DE PROVA OFICIAL: HOJE É O DIA DA MEIA MARATONA OFICIAL (21.1 KM). Substitua obrigatoriamente todos os termos 'Treino' por 'Meia Maratona' ou 'Prova Oficial' no cabeçalho e ao longo de todo o relatório.\n\n");
-        }
 
         sb.append("INSTRUÇÃO FISIOLÓGICA: Considere o estresse térmico acima na análise. Se a umidade for alta (>80%) ou a temperatura for elevada (>25°C), mencione o impacto no aumento da Frequência Cardíaca (débito cardíaco) para termorregulação e dê recomendações de hidratação e recuperação.\n\n");
 
@@ -440,6 +451,27 @@ public class InsightService {
         sb.append("--- CONTEXTO HISTÓRICO DE LEITURA INTERNA (ÚLTIMAS ATIVIDADES GLOBAIS) ---\n");
         sb.append("ATENÇÃO IA: Use o histórico abaixo APENAS como base de conhecimento interna para avaliar a evolução na Seção 4.0. É PROIBIDO IMPRIMIR ESTE BLOCO NO TELEGRAM:\n");
         sb.append(historicoPerformanceGlobal).append("\n\n");
+
+        sb.append("--- OBJETIVO ATIVO E DIRETRIZ DE ESTILO DO ATLETA ---\n");
+        if (objetivoAtivo != null) {
+            sb.append("- Categoria do Objetivo: ").append(objetivoAtivo.getCategory());
+            if (objetivoAtivo.getCategory() != null) {
+                sb.append(" (").append(objetivoAtivo.getCategory().getLabel()).append(")");
+            }
+            sb.append("\n");
+            sb.append("- Código de Estilo de Treino: ").append(objetivoAtivo.getTrainingStyleCode()).append("\n");
+            if (objetivoAtivo.getEvent() != null) {
+                sb.append("- Evento/Prova Vinculada: ").append(objetivoAtivo.getEvent().getEventName())
+                        .append(" | Data: ").append(objetivoAtivo.getEvent().getEventDate())
+                        .append(" | Distância Alvo: ").append(objetivoAtivo.getEvent().getTargetDistanceKm()).append(" km\n");
+            }
+        } else {
+            sb.append("- Objetivo Ativo: Não definido (usar rotina/consistência padrão).\n");
+        }
+        if (styleContextMongo != null && !styleContextMongo.isBlank()) {
+            sb.append("- Diretriz do Estilo no MongoDB:\n").append(styleContextMongo).append("\n");
+        }
+        sb.append("\n");
 
         sb.append("--- DADOS DO TREINO ATUAL ---\n");
         sb.append("DADOS DO TREINO: ").append(name).append(" | ").append(String.format("%.1f km", metrics.safeDistance())).append(" | Pace Médio: ").append(metrics.paceFormatted()).append("\n");
@@ -498,10 +530,10 @@ public class InsightService {
         }
         sb.append("\n\n");
 
-        sb.append("📈 MÉDIAS DE EFICIÊNCIA ACUMULADAS (5 treinos):\n");
-        sb.append("• Rodagem Curta (Terça): ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" | Nível ").append(nivelAtualCenario1).append("\n");
-        sb.append("• Tiros / VO2máx (Quinta): ").append(String.format("%.3f", mediaEficienciaTiros)).append(" | Nível ").append(nivelAtualCenario2).append("\n");
-        sb.append("• Longão (Sábado): ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" | Nível ").append(nivelAtualCenario1).append("\n");
+        sb.append("📈 MÉDIAS DE EFICIÊNCIA ACUMULADAS (5 treinos) | DIAS DO ATLETA (").append(resumoDiasAtleta).append("):\n");
+        sb.append("• Base Curta / Cenário 1: ").append(String.format("%.3f", mediaEficienciaZ2Curto)).append(" | Nível ").append(nivelAtualCenario1).append("\n");
+        sb.append("• Tiros / Cenário 2: ").append(String.format("%.3f", mediaEficienciaTiros)).append(" | Nível ").append(nivelAtualCenario2).append("\n");
+        sb.append("• Base Longa / Cenário 1: ").append(String.format("%.3f", mediaEficienciaZ2Longo)).append(" | Nível ").append(nivelAtualCenario1).append("\n");
 
         sb.append("📊 HISTÓRICO MÉDIO (10 treinos):\n");
         sb.append("- VO2 Máx Médio: ").append(String.format("%.1f", histVo2Medio)).append(" ml/kg/min\n");
@@ -548,19 +580,7 @@ public class InsightService {
         sb.append("• Justifique a estabilidade utilizando o Desvio Padrão de ").append(String.format("%.1f", metrics.stdDev())).append(" bpm e as ").append(picosIntervalados).append(" janelas instáveis identificadas pelo sistema.\n");
         sb.append("• Avalie a presença ou ausência de Pace Drift (desacoplamento cardiovascular) entre a primeira e a segunda metade do treino.\n\n");
 
-        sb.append("3.5 - 🎯 AVALIAÇÃO DE PRONTIDÃO E PREPARO PARA A MEIA MARATONA (31/10/2026):\n");
-        sb.append("[FOCO EXCLUSIVO: ANÁLISE DE PRONTIDÃO, PREVENÇÃO DE LESÕES E ESTRATÉGIA DE PROVA]\n");
-        sb.append("• CONTAGEM REGRESSIVA OFICIAL: Faltam exatamente ").append(diasRestantes).append(" dias (aprox. ")
-                .append(semanasRestantes).append(" semanas) para a Meia Maratona de 31/10/2026.\n");
-        sb.append("• Consulte no contexto do MongoDB o documento 'macro_ciclo_meia_maratona_2026' ou 'DIRETRIZ_PROVA_ALVO' correspondente à fase atual (Faltam ").append(diasRestantes).append(" dias).\n");
-        sb.append("• Com base no treino executado HOJE por ").append(nomeAtletaReal).append(" (Pace: ").append(metrics.paceFormatted())
-                .append(", FC Média: ").append(String.format("%.0f", metrics.fcMedia())).append(" bpm, Efficiency Index: ")
-                .append(String.format("%.3f", metrics.efficiencyIndex())).append("), desenvolva uma análise cobrindo obrigatoriamente:\n");
-        sb.append("  1. PRONTIDÃO E PACE DE PROVA: Avaliação da capacidade de sustentar os 21.1 km com a economia de corrida demonstrada hoje.\n");
-        sb.append("  2. PRESERVAÇÃO MUSCULAR E PREVENÇÃO DE LESÕES: Orientações práticas de fortalecimento (foco em sóleo, quadríceps e visualização de estabilização) e alongamentos pós-treino.\n");
-        sb.append("  3. FOCO MENTAL E DETERMINAÇÃO: Instrução tática para controle de ansiedade, gestão de ritmo e disciplina de pace em Z2.\n\n");
-
-       sb.append("  - DIRETRIZ DE IMPACTO AMBIENTAL: Em casos de STATUS [CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO] ou desempenho excepcional/abaixo do esperado, analise OBRIGATORIAMENTE o impacto direto do ganho/perda de elevação e das condições climáticas sobre o ritmo, fadiga e frequência cardíaca do atleta, utilizando os dados abaixo:\n")
+        sb.append("  - DIRETRIZ DE IMPACTO AMBIENTAL: Em casos de STATUS [CUMPRIDO PARCIALMENTE | NÃO CUMPRIDO] ou desempenho excepcional/abaixo do esperado, analise OBRIGATORIAMENTE o impacto direto do ganho/perda de elevação e das condições climáticas sobre o ritmo, fadiga e frequência cardíaca do atleta, utilizando os dados abaixo:\n")
                 .append("     Condições Climáticas: ").append(climaHeader).append("\n")
                 .append("     Altimetria Acumulada: +").append(String.format("%.0f", metrics.ganhoAlt())).append("m de ganho / -").append(String.format("%.0f", Math.abs(metrics.perdaAlt())))
                 .append("m de perda (Variação Total em Circuito: ")
@@ -579,17 +599,17 @@ public class InsightService {
 
         sb.append("• É ESTRITAMENTE PROIBIDO repetir explicações sobre PGC-1alpha, mitocôndrias ou autores já citados na Seção 2.0.\n\n");
         sb.append("4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO \n");
-        sb.append("- OBJETIVO DA SEÇÃO: Fazer um fechamento leve, sucinto e 100% focado no progresso prático para a Meia Maratona. É ESTRITAMENTE PROIBIDO repetir números, médias históricas ou teorias fisiológicas já explicadas nas seções 2.0 e 3.0.\n");
+        sb.append("- OBJETIVO DA SEÇÃO: Fazer um fechamento leve, sucinto e 100% focado no progresso. É ESTRITAMENTE PROIBIDO repetir números, médias históricas ou teorias fisiológicas já explicadas nas seções 2.0 e 3.0.\n");
         sb.append("- LINGUAGEM: Use linguagem simples, descontraída e motivadora (como uma conversa direta de treinador para atleta).\n");
         sb.append("- REGRAS DINÂMICAS DE CONTEÚDO:\n");
         sb.append("  • Diga em poucas palavras o que o treino executado HOJE agrega na prática.\n");
-        sb.append("  • Adapte a conexão com o próximo treino de acordo com o calendário real (ex: se hoje foi Terça, mencione o preparo para Quinta; se hoje foi Quinta, mencione o descanso/preparo para o Fim de Semana; se foi Fim de Semana, mencione a recuperação para a próxima Terça).\n");
-        sb.append("  • Finalize com uma mensagem curta e empolgante focada na Meia Maratona de 31/10/2026.\n\n");
+        sb.append("  • Conecte o treino de hoje ao próximo treino agendado (").append(proximoTreinoData)
+                .append(") e aos dias de treino configurados pelo atleta (").append(resumoDiasAtleta).append(").\n");
 
         sb.append("--- ESTRUTURA DO EXEMPLO DE CONCLUSÃO (ADAPTE AO DIA E TREINO REAL) ---\n");
         sb.append("✅ '4.0 - 🎯 CONCLUSÃO E PRÓXIMO PASSO\n");
         sb.append("  [Primeiro Nome], o treino de hoje [Tipo do Treino de Hoje] cumpriu perfeitamente o papel de [Benefício Prático em linguagem simples]. É essa consistência que garante o corpo pronto para [Conexão com o Próximo Treino Prescrito]!\n");
-        sb.append("  Você tá construindo um ritmo de prova cada vez mais sólido. Mantém o foco e a disciplina que a Meia Maratona de 31/10 tá logo ali e você vai chegar voando! Tamo junto nessa! 🚀'\n\n");
+        sb.append("  Você tá construindo um ritmo cada vez mais sólido. 🚀'\n\n");
 
         sb.append("5.0 - 🍽️ NUTRIÇÃO / DESCANSO 💤\n");
         sb.append("[Prescreva a estratégia detalhada de alimentação pré/pós treino e janelas de repouso conforme as diretrizes do MongoDB para o tipo de treino realizado HOJE. Se foi Z2 use 'light_moderated_days', se foi Tiros use 'high_intensity_days']\n\n");
@@ -766,17 +786,22 @@ public class InsightService {
 
     private String calcularProximaDataTreino(ZonedDateTime date, Set<DayOfWeek> diasDeTreino) {
         LocalDate today = LocalDate.now(ZONE_SP);
-        LocalDate baseDate = date.toLocalDate().isBefore(today) ? today : date.toLocalDate();
+        LocalDate baseDate = (date != null && !date.toLocalDate().isBefore(today))
+                ? date.toLocalDate()
+                : today;
         LocalDate dataIteracao = baseDate.plusDays(1);
 
         Set<DayOfWeek> diasValidos = (diasDeTreino != null && !diasDeTreino.isEmpty())
                 ? diasDeTreino
                 : Set.of(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY);
 
-        while (!diasValidos.contains(dataIteracao.getDayOfWeek())) {
+        int tentativas = 0;
+        while (!diasValidos.contains(dataIteracao.getDayOfWeek()) && tentativas < 7) {
             dataIteracao = dataIteracao.plusDays(1);
+            tentativas++;
         }
-        return dataIteracao.format(NEXT_WORKOUT_FORMATTER);
+
+        return dataIteracao.format(NEXT_WORKOUT_FORMATTER.withLocale(java.util.Locale.forLanguageTag("pt-BR")));
     }
 
     private int determinarCenarioAlvo(DayOfWeek diaAgendado, Set<DayOfWeek> diasDoAtleta) {

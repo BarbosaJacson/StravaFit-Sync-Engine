@@ -10,15 +10,8 @@ import java.util.Optional;
 @Repository
 public interface WorkoutPrescriptionRepository extends JpaRepository<WorkoutPrescriptionEntity, Long> {
 
-    Optional<WorkoutPrescriptionEntity> findByScheduledDate(LocalDate scheduledDate);
-
-    Optional<WorkoutPrescriptionEntity> findTopByScheduledDateOrderByCreatedAtDesc(LocalDate scheduledDate);
-
-    Optional<WorkoutPrescriptionEntity> findTopByScheduledDateLessThanEqualOrderByScheduledDateDescCreatedAtDesc(LocalDate scheduledDate);
 
     Optional<WorkoutPrescriptionEntity> findByActivityId(Long activityId);
-
-    Optional<WorkoutPrescriptionEntity> findTopByTargetScenarioOrderByScheduledDateDescCreatedAtDesc(Integer targetScenario);
 
     Optional<WorkoutPrescriptionEntity> findByUserIdAndScheduledDate(Long userId, LocalDate scheduledDate);
 

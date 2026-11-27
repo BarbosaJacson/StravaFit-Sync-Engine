@@ -1,6 +1,7 @@
 package jackson.stravafit.service;
 
 import jackson.stravafit.model.Gender;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -10,16 +11,20 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+
 @Slf4j
 @Service
 public class KnowledgeService {
 
     private final MongoTemplate mongoTemplate;
     private final Map<Gender, String> contextCache = new ConcurrentHashMap<>();
+    private final String baseCollectionName;
 
-    // O Spring Boot injeta o MongoTemplate pré-configurado com a sua conexão do strava_fit_db
-    public KnowledgeService(MongoTemplate mongoTemplate) {
+    public KnowledgeService(
+            MongoTemplate mongoTemplate,
+            @Value("${stravafit.mongodb.knowledge-collection:training_styles}") String baseCollectionName) {
         this.mongoTemplate = mongoTemplate;
+        this.baseCollectionName = baseCollectionName;
     }
 
     public String getScientificContext(Gender gender) {
@@ -34,7 +39,8 @@ public class KnowledgeService {
             }
 
             // 3. Define dinamicamente o nome da coleção usando a variável activeGender
-            String collectionName = (activeGender == Gender.FEMALE) ? "scenarios_female" : "scenarios_male";
+            String suffix = (activeGender == Gender.FEMALE) ? "_female" : "_male";
+            String collectionName = baseCollectionName + suffix;
             log.info("[MONGO] Buscando documentos de inteligência na coleção '{}'...", collectionName);
 
             List<Document> documentos = mongoTemplate.findAll(Document.class, collectionName);

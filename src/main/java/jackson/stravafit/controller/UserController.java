@@ -75,6 +75,13 @@ public class UserController {
         if (payload.get("birthDate") instanceof String birthDateStr && !birthDateStr.isBlank()) {
             user.setBirthDate(LocalDate.parse(birthDateStr));
         }
+        Integer weeklyFrequency = toInteger(payload.get("weeklyFrequency"));
+        if (weeklyFrequency != null && weeklyFrequency >= 1 && weeklyFrequency <= 7) {
+            user.setWeeklyFrequency(weeklyFrequency);
+        }
+        if (payload.get("trainingDays") instanceof String trainingDaysStr && !trainingDaysStr.isBlank()) {
+            user.setTrainingDays(trainingDaysStr.trim().toUpperCase());
+        }
 
         String source = (payload.get("hrZoneSource") instanceof String s) ? s.trim().toUpperCase() : "FORMULA";
         user.setHrZoneSource(source);

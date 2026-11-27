@@ -4,37 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StravaFit — Painel do Atleta</title>
-
-  <style>
-    #loading-screen {
-        position: fixed;
-        inset: 0;
-        background: #05070b;
-        color: #f3f6fb;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 14px;
-        z-index: 999;
-        opacity: 1;
-        transition: opacity 0.35s ease;
-    }
-    #loading-screen.hidden {
-        opacity: 0;
-        pointer-events: none;
-    }
-    #loading-screen img {
-        max-width: min(440px, 85vw);
-        max-height: 50vh;
-        border-radius: 12px;
-    }
-  </style>
+  <link rel="stylesheet" href="./css/style.css" />
 </head>
 <body>
 <h1>StravaFit</h1>
 
 <section id="perfil">
+  <a id="btn-login-google" href="/oauth2/authorization/google" style="display: none;">Entrar com Google</a>
   <h2>Meu Perfil</h2>
   <p id="status-perfil">Carregando dados...</p>
   <pre id="dados-perfil"></pre>
@@ -106,157 +82,35 @@
   <p id="loading-text">Carregando...</p>
 </div>
 
-<script>
-  const loadingEl = document.getElementById("loading-screen");
-  const loadingTextEl = document.getElementById("loading-text");
-  const aguardar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+<section id="secao-objetivos">
+  <h2>Objetivo do Atleta e Frequência Recomendada</h2>
+  <p id="resumo-objetivo-atual">Carregando objetivo ativo...</p>
+  <p id="recomendacao-frequencia">Frequência semanal recomendada: —</p>
 
-  function mostrarCarregamento(texto) {
-      if (loadingTextEl) loadingTextEl.textContent = texto || "Carregando...";
-      if (loadingEl) loadingEl.classList.remove("hidden");
-  }
+  <form id="form-objetivo">
+    <div>
+      <label for="select-goal-category">Objetivo Principal:</label>
+      <select id="select-goal-category" name="category">
+        <option value="ROUTINE_CONSISTENCY">Rotina e Consistência</option>
+        <option value="CARDIO_LONGEVITY">Saúde Cardíaca e Longevidade</option>
+        <option value="HIGH_PERFORMANCE">Alta Performance</option>
+      </select>
+    </div>
 
-  function esconderCarregamento() {
-      if (loadingEl) loadingEl.classList.add("hidden");
-  }
-  const zoneSourceSelectEl = document.getElementById("select-zone-source");
-  const camposFormulaEl = document.getElementById("campos-formula");
-  const camposExameEl = document.getElementById("campos-exame");
+    <div>
+      <label for="input-event-name">Evento / Prova (opcional):</label>
+      <input id="input-event-name" name="eventName" type="text" placeholder="Ex.: Meia Maratona" />
+    </div>
 
-  function atualizarCamposZona() {
-      const isExam = zoneSourceSelectEl && zoneSourceSelectEl.value === "EXAM";
-      if (camposFormulaEl) camposFormulaEl.style.display = isExam ? "none" : "block";
-      if (camposExameEl) camposExameEl.style.display = isExam ? "block" : "none";
-  }
+    <div>
+      <label for="input-event-date">Data do Evento (opcional):</label>
+      <input id="input-event-date" name="eventDate" type="date" />
+    </div>
 
-  function preencherFormularioPerfil(user) {
-      if (!user) return;
-
-      const nameEl = document.getElementById("input-name");
-      const birthDateEl = document.getElementById("input-birth-date");
-      const emailEl = document.getElementById("input-email");
-      const hrMaxFormulaEl = document.getElementById("input-hr-max-formula");
-      const hrRestingEl = document.getElementById("input-hr-resting");
-      const lv1El = document.getElementById("input-lv1");
-      const lv2El = document.getElementById("input-lv2");
-      const hrMaxExamEl = document.getElementById("input-hr-max-exam");
-
-      if (nameEl) nameEl.value = user.name ?? "";
-      if (birthDateEl) birthDateEl.value = user.birthDate ?? "";
-      if (emailEl) emailEl.value = user.email ?? "";
-
-      if (zoneSourceSelectEl) {
-          zoneSourceSelectEl.value = user.hrZoneSource === "EXAM" ? "EXAM" : "FORMULA";
-      }
-      atualizarCamposZona();
-
-      if (user.hrZoneSource === "EXAM") {
-          if (lv1El && user.z2MaxBpm != null) lv1El.value = user.z2MaxBpm;
-          if (lv2El && user.z4MaxBpm != null) lv2El.value = user.z4MaxBpm;
-          if (hrMaxExamEl && user.hrMax != null) hrMaxExamEl.value = user.hrMax;
-      } else {
-          if (hrMaxFormulaEl && user.hrMax != null) hrMaxFormulaEl.value = user.hrMax;
-          if (hrRestingEl && user.hrResting != null) hrRestingEl.value = user.hrResting;
-      }
-  }
-
-  if (zoneSourceSelectEl) {
-      zoneSourceSelectEl.addEventListener("change", atualizarCamposZona);
-  }
-  atualizarCamposZona();
-
-  const formPerfilEl = document.getElementById("form-perfil-zonas");
-  if (formPerfilEl) {
-      formPerfilEl.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const statusSalvarEl = document.getElementById("status-salvar-perfil");
-          const hrZoneSource = zoneSourceSelectEl ? zoneSourceSelectEl.value : "FORMULA";
-
-          const payload = {
-              name: document.getElementById("input-name")?.value?.trim() || null,
-              birthDate: document.getElementById("input-birth-date")?.value || null,
-              email: document.getElementById("input-email")?.value?.trim() || null,
-              hrZoneSource
-          };
-
-          if (hrZoneSource === "EXAM") {
-              payload.lv1 = Number(document.getElementById("input-lv1")?.value) || null;
-              payload.lv2 = Number(document.getElementById("input-lv2")?.value) || null;
-              payload.hrMax = Number(document.getElementById("input-hr-max-exam")?.value) || null;
-          } else {
-              payload.hrMax = Number(document.getElementById("input-hr-max-formula")?.value) || null;
-              payload.hrResting = Number(document.getElementById("input-hr-resting")?.value) || null;
-          }
-
-          if (statusSalvarEl) statusSalvarEl.textContent = "Salvando dados...";
-          mostrarCarregamento("Salvando perfil e zonas...");
-          try {
-              const resp = await fetch("/api/me", {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  credentials: "same-origin",
-                  body: JSON.stringify(payload)
-              });
-              if (!resp.ok) {
-                  if (statusSalvarEl) statusSalvarEl.textContent = `Falha ao salvar (status ${resp.status}).`;
-                  return;
-              }
-              if (statusSalvarEl) statusSalvarEl.textContent = "Dados salvos com sucesso!";
-              await carregarPerfil();
-          } catch (err) {
-              if (statusSalvarEl) statusSalvarEl.textContent = "Erro ao enviar dados: " + err.message;
-          } finally {
-              esconderCarregamento();
-          }
-      });
-  }
-
-  async function carregarPerfil() {
-      const statusEl = document.getElementById("status-perfil");
-      const dadosEl = document.getElementById("dados-perfil");
-      mostrarCarregamento("Carregando perfil do atleta...");
-      try {
-          const [resp] = await Promise.all([
-              fetch("/api/me", { credentials: "same-origin" }),
-              aguardar(1200)
-          ]);
-          if (!resp.ok) {
-              statusEl.textContent = "Sessão não autenticada (status " + resp.status + ").";
-              return;
-          }
-          const user = await resp.json();
-          preencherFormularioPerfil(user);
-          statusEl.textContent = `Logado como ${user.name} (${user.email}) | Strava conectado: ${user.stravaConnected ? "Sim" : "Não"}`;
-          dadosEl.textContent = JSON.stringify(user, null, 2);
-      } catch (err) {
-          statusEl.textContent = "Erro ao consultar /api/me: " + err.message;
-      } finally {
-          esconderCarregamento();
-      }
-  }
-
-  document.getElementById("btn-sincronizar").addEventListener("click", async () => {
-      const syncEl = document.getElementById("status-sync");
-      syncEl.textContent = "Disparando sincronização...";
-      mostrarCarregamento("Sincronizando treinos...");
-      try {
-          const [resp] = await Promise.all([
-              fetch("/api/sync", {
-                  method: "POST",
-                  credentials: "same-origin"
-              }),
-              aguardar(1200)
-          ]);
-          const data = await resp.json();
-          syncEl.textContent = `${data.status}: ${data.message}`;
-      } catch (err) {
-          syncEl.textContent = "Erro ao disparar sincronização: " + err.message;
-      } finally {
-          esconderCarregamento();
-      }
-  });
-
-  carregarPerfil();
-</script>
+    <button id="btn-salvar-objetivo" type="submit">Salvar Objetivo</button>
+    <p id="status-salvar-objetivo"></p>
+  </form>
+</section>
+<script src="./js/app.js"></script>
 </body>
 </html>
